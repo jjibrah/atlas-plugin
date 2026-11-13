@@ -106,6 +106,45 @@ docs/index.html   the guide (GitHub Pages)
 
 ## Contributing
 
+**Improvements go to `dev`; tested releases go to `main`.**
+`main` is protected: changes must arrive through a pull request, review
+conversations must be resolved, and force pushes and deletion are blocked.
+These protections also apply to administrators.
+
+- **Contributors with write access:** work on `dev`, or open a feature-branch
+  pull request targeting `dev`.
+- **Outside contributors:** fork the repository, branch from `dev`, and open a
+  pull request targeting this repository's `dev` branch. A public repository
+  does not grant visitors permission to push directly.
+- **Maintainer:** test the changes on `dev`, then open a pull request from
+  `dev` to `main` and merge when ready. Keep `dev` after merging so development
+  can continue. An additional reviewer's approval is optional; no automated
+  status checks are currently required.
+
+For collaborators with write access:
+
+```bash
+git fetch origin
+git switch dev
+git pull --ff-only origin dev
+# Make and test your improvements.
+git add <changed-files>
+git commit -m "Describe your improvement"
+git push origin dev
+```
+
+For the maintainer, once the changes have been tested:
+
+```bash
+gh pr create --base main --head dev
+# Review and merge the pull request on GitHub when ready.
+# After merging, bring main back into dev before continuing development:
+git fetch origin
+git switch dev
+git merge origin/main
+git push origin dev
+```
+
 Each agent can be improved on its own. Read [`CONTRACT.md`](CONTRACT.md) first; agents interoperate only through it. Run a full flow on a sample project before opening a pull request:
 
 ```bash
@@ -117,12 +156,13 @@ python3 lib/atlasctl.py new "Sample" --client "Sample Co" --size Small --author 
 ## Guide hosting
 
 The usage guide is published at **https://jjibrah.github.io/atlas-plugin/**.
-GitHub Pages serves the `docs/` folder on `main`; pushes that update this folder
-publish automatically. `docs/.nojekyll` keeps the guide as plain static HTML.
+GitHub Pages serves the `docs/` folder on `main`; merging guide changes into
+`main` publishes them automatically. Changes on `dev` do not update the live site. `docs/.nojekyll` keeps the guide as plain static HTML.
 No build tools or application server are needed.
 
 To update the guide, edit `docs/index.html`, `docs/assets/style.css` (design),
-or `docs/assets/guide.js` (interactions), then commit and push to `main`.
+or `docs/assets/guide.js` (interactions), then commit and push to `dev`.
+Test the changes, then merge a `dev` → `main` pull request to publish.
 The guide uses a light theme, responsive navigation, copyable setup commands,
 and a searchable command reference.
 
