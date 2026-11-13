@@ -19,7 +19,7 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to the guide</a>
-<div class="field" aria-hidden="true"><i></i><i></i></div>
+<div class="field" aria-hidden="true"><i></i><i></i><i></i></div>
 
 <nav class="nav" aria-label="Sections">
   <div class="wrap">
@@ -27,6 +27,7 @@
       <a class="brand" href="#top">ATLAS</a>
       <a class="l" href="#run">How it runs</a>
       <a class="l" href="#agents">Agents</a>
+      <a class="l" href="#outputs">Documents</a>
       <a class="l" href="#tracker">Tracking</a>
       <a class="l" href="#walkthrough">Walkthrough</a>
       <button class="motion" type="button" id="motion" aria-pressed="false">Pause motion</button>
@@ -65,6 +66,7 @@
         <div class="plate" style="--i:4"><b>Sentinel</b><span>Test</span><i>G5</i></div>
         <div class="plate" style="--i:5"><b>Alice</b><span>Hand over</span><i>done</i></div>
       </div>
+      <div class="passed glass">Check G2 passed</div>
       <div class="watch glass">
         <strong>Atlas is watching</strong>
         <span class="mono" id="watch">scanning 2 repositories…</span>
@@ -96,7 +98,7 @@
         <p id="say">Atlas creates the project and asks for the client, the size and the code repository.</p>
         <div class="ctl">
           <button type="button" id="play" aria-pressed="true">Pause</button>
-          <button type="button" id="step">Next step</button>
+          <button type="button" id="step">Show next step</button>
           <span class="count" id="count">1 / 9</span>
         </div>
       </div>
@@ -123,6 +125,28 @@
       <div class="row"><h3>Jarvis</h3><span class="role">Plan</span><p class="does">Turns the design into phases and work packages, and audits code that already exists.</p><p class="out">Plan, briefs for coding agents, audit</p></div>
       <div class="row"><h3>Sentinel</h3><span class="role">Test, release</span><p class="does">Writes each phase's tests from its acceptance criteria and reads results from your test reports.</p><p class="out">Test plan, client acceptance script, go-live checklist</p></div>
       <div class="row"><h3>Spartan</h3><span class="role">Risk, security</span><p class="does">Reviews every change to a Critical module and explains any check that does not pass.</p><p class="out">Security reviews, waivers with a recorded reason</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="outputs" class="outputs">
+  <div class="wrap">
+    <div class="text">
+      <h2>Documents your client and your team can use.</h2>
+      <p class="sub">Every document is written from the one before it, and each statement can be traced back to the meeting where it was said.</p>
+      <dl>
+        <div><dt>Proposal</dt><dd>Plain language, sent to the client as a PDF</dd></div>
+        <div><dt>Client questions</dt><dd>Only what the client alone can answer</dd></div>
+        <div><dt>PRD</dt><dd>The internal source of truth, never sent out</dd></div>
+        <div><dt>Design</dt><dd>Diagrams, data model and acceptance criteria</dd></div>
+        <div><dt>Plan</dt><dd>Phases and work packages for whoever builds</dd></div>
+        <div><dt>Handover pack</dt><dd>What was delivered and how to run it</dd></div>
+      </dl>
+    </div>
+    <div class="sheets">
+      <figure class="sheet a"><img src="assets/sample-design.png" width="1170" height="1515" loading="lazy" alt="A design page for a sample bakery project: a diagram of an order's life from placed to collected, a diagram of taking an order with a deposit, and a table of three modules."></figure>
+      <figure class="sheet b"><img src="assets/sample-proposal.png" width="1170" height="1515" loading="lazy" alt="A client proposal for the same sample project: what we understood, the problems it solves, what will be built, and three delivery phases."></figure>
+      <div class="stamp glass"><strong>Proposal v1.0 approved</strong>by the owner, 4 November<br><span class="mono">snapshot saved · G1 passed</span></div>
     </div>
   </div>
 </section>
@@ -215,7 +239,8 @@ atlas setup --mode github</code></pre>
         <article class="glass">
           <h3>Folder storage <span class="tag">solo</span></h3>
           <p>A local folder, or one synced by Dropbox, iCloud or a shared drive. A project can move to GitHub later.</p>
-<pre class="code"><code>atlas setup --mode folder --path ~/AtlasProjects</code></pre>
+<pre class="code"><code>atlas setup --mode folder \
+  --path ~/AtlasProjects</code></pre>
         </article>
       </div>
     </div>
@@ -262,7 +287,13 @@ atlas setup --mode github</code></pre>
 
 <section id="faq">
   <div class="wrap faq">
-    <h2>Questions people ask first.</h2>
+    <div class="lede">
+      <h2>Questions people ask first.</h2>
+      <div class="actions">
+        <a class="btn solid" href="#install">Install ATLAS</a>
+        <a class="btn line" href="https://github.com/jjibrah/atlas-plugin">Read the source</a>
+      </div>
+    </div>
     <div class="list">
       <details><summary>Where does client information go?</summary><p>Into the project's private storage: a private GitHub repository or your own folder. It never enters the code repository that teammates clone. Only the proposal, questions, acceptance script, updates and handover pack are exported, as PDFs.</p></details>
       <details><summary>What if a teammate pushes code without the plugin?</summary><p>That is the normal case. Atlas reads their commits, branches, pull requests and CI the next time you check in, and asks you about anything it cannot match.</p></details>
@@ -274,25 +305,12 @@ atlas setup --mode github</code></pre>
   </div>
 </section>
 
-<section class="close">
-  <div class="wrap">
-    <div class="box glass">
-      <h2>Run your next client project with ATLAS.</h2>
-      <div class="actions">
-        <a class="btn solid" href="#install">Install ATLAS
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
-        <a class="btn line" href="https://github.com/jjibrah/atlas-plugin">Read the source on GitHub</a>
-      </div>
-    </div>
-  </div>
-</section>
-
 </main>
 
 <footer>
   <div class="wrap">
-    <span>ATLAS is open source under the MIT licence. It works with Claude Code and OpenAI Codex.</span>
-    <a href="https://github.com/jjibrah/atlas-plugin">github.com/jjibrah/atlas-plugin</a>
+    <p>ATLAS is open source under the MIT licence. It works with Claude Code and OpenAI Codex.</p>
+    <p><a href="https://github.com/jjibrah/atlas-plugin">github.com/jjibrah/atlas-plugin</a></p>
   </div>
 </footer>
 
