@@ -234,17 +234,17 @@ footer{padding:36px 0 60px;color:var(--muted);font-size:14px;border-top:1px soli
       <button role="tab" aria-selected="false" aria-controls="t-local" id="b-local">From a clone</button>
     </div>
     <div class="panel" id="t-claude" role="tabpanel" aria-labelledby="b-claude">
-<pre><code>claude plugin marketplace add &lt;github-user&gt;/atlas-plugin
+<pre><code>claude plugin marketplace add jjibrah/atlas-plugin
 claude plugin install atlas@atlas</code></pre>
-      Then, in Claude Code, type <code>/atlas</code> or simply ask, e.g. “set up atlas”.
+      Start a new Claude Code session, then type <code>/atlas</code> or simply ask, e.g. “set up atlas”.
     </div>
     <div class="panel" id="t-codex" role="tabpanel" aria-labelledby="b-codex" hidden>
-<pre><code>codex plugin marketplace add &lt;github-user&gt;/atlas-plugin
+<pre><code>codex plugin marketplace add jjibrah/atlas-plugin
 codex plugin add atlas@atlas</code></pre>
-      Then, in Codex, mention <code>$atlas</code> or simply ask, e.g. “set up atlas”.
+      Start a new Codex session, then mention <code>$atlas</code> or simply ask, e.g. “set up atlas”.
     </div>
     <div class="panel" id="t-local" role="tabpanel" aria-labelledby="b-local" hidden>
-<pre><code>git clone https://github.com/&lt;github-user&gt;/atlas-plugin.git
+<pre><code>git clone https://github.com/jjibrah/atlas-plugin.git
 cd atlas-plugin
 ./install.sh            # installs into Claude Code and Codex if found</code></pre>
     </div>
@@ -261,7 +261,7 @@ python3 lib/atlasctl.py setup --mode github</code></pre></div>
 <pre><code>python3 lib/atlasctl.py setup --mode folder \
   --path ~/AtlasProjects</code></pre></div>
     </div>
-    <p class="sub" style="margin-top:12px">When ATLAS is installed as a plugin, the agent runs these commands for you. Just say “set up atlas”.</p>
+    <p class="sub" style="margin-top:12px">Run these Python commands from the cloned repository. When ATLAS is installed from the marketplace, the agent runs them for you. Just say “set up atlas”.</p>
   </div>
 </section>
 
@@ -316,7 +316,7 @@ python3 lib/atlasctl.py setup --mode github</code></pre></div>
 </section>
 
 <footer>
-  <div class="wrap">ATLAS is open source under the MIT licence. Works with Claude Code and OpenAI Codex.</div>
+  <div class="wrap">ATLAS is open source under the MIT licence. Works with Claude Code and OpenAI Codex. <a href="https://github.com/jjibrah/atlas-plugin">Source on GitHub</a>.</div>
 </footer>
 
 <script>
@@ -337,7 +337,7 @@ python3 lib/atlasctl.py setup --mode github</code></pre></div>
   document.querySelectorAll('pre').forEach(function(pre){
     var b=document.createElement('button');b.className='copy';b.type='button';b.textContent='Copy';
     b.addEventListener('click',function(){
-      var txt=pre.innerText.replace(/\nCopy$/,'');
+      var txt=pre.querySelector('code').textContent;
       (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)}).catch(function(){b.textContent='Select & copy'});
     });
     pre.appendChild(b);

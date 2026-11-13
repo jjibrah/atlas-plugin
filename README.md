@@ -7,7 +7,7 @@ You build the software. ATLAS:
 - keeps a tamper-evident record of everything that happened;
 - reads the real state of your code from git, so the tracker stays accurate even when nobody updates it.
 
-📖 **Guide with diagrams:** open [`docs/index.html`](docs/index.html), or the GitHub Pages site for this repo.
+📖 **[Read the usage guide](https://jjibrah.github.io/atlas-plugin/)** — installation, agent roles, diagrams, and an end-to-end walkthrough. You can also open [`docs/index.html`](docs/index.html) locally.
 
 | Agent | Role | Produces |
 |---|---|---|
@@ -36,20 +36,22 @@ You need:
 
 ```bash
 # Claude Code
-claude plugin marketplace add <your-github-user>/atlas-plugin
+claude plugin marketplace add jjibrah/atlas-plugin
 claude plugin install atlas@atlas
 
 # Codex
-codex plugin marketplace add <your-github-user>/atlas-plugin
+codex plugin marketplace add jjibrah/atlas-plugin
 codex plugin add atlas@atlas
 ```
 
 **From a local clone:**
 
 ```bash
-git clone https://github.com/<your-github-user>/atlas-plugin.git
+git clone https://github.com/jjibrah/atlas-plugin.git
 cd atlas-plugin && ./install.sh        # installs into every CLI it finds
 ```
+
+After installation, start a new Claude Code or Codex session so it loads the plugin.
 
 ## Set up (once per device)
 
@@ -59,6 +61,8 @@ Open Claude Code or Codex and say **"set up atlas"**, or run the setup yourself.
 |---|---|---|
 | **GitHub** (recommended) | `gh auth login`, then `python3 lib/atlasctl.py setup --mode github` | Teams and several devices. Each project is a **private repo**, and a private `atlas-registry` repo lists them all |
 | **Folder** | `python3 lib/atlasctl.py setup --mode folder --path ~/AtlasProjects` | Working alone, offline, or with a Dropbox, iCloud or shared drive |
+
+The Python commands above run from the repository root. If you installed directly from the marketplace, ask the agent to run setup for you.
 
 Setup also creates `~/.atlas/venv`, with PyMuPDF for reading PDFs. Run `python3 lib/atlasctl.py doctor` to check everything.
 
@@ -109,6 +113,15 @@ export ATLAS_HOME=$(mktemp -d) ATLAS_OUTBOX=$(mktemp -d)
 python3 lib/atlasctl.py setup --mode folder --path "$ATLAS_HOME/projects" --no-deps
 python3 lib/atlasctl.py new "Sample" --client "Sample Co" --size Small --author "You"
 ```
+
+## Guide hosting
+
+The usage guide is published at **https://jjibrah.github.io/atlas-plugin/**.
+GitHub Pages serves the `docs/` folder on `main`; pushes that update this folder
+publish automatically. `docs/.nojekyll` keeps the guide as plain static HTML.
+No build tools or application server are needed.
+
+To update the guide, edit `docs/index.html`, commit, and push to `main`.
 
 ## Licence
 
