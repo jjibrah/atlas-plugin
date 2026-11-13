@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATLAS — agent team for client projects</title>
+<meta name="description" content="ATLAS is an open-source plugin for Claude Code and Codex: six AI agents that take client software projects from the first meeting to handover, with a tamper-evident project log.">
+<style>
+:root{
+  --bg:#f7f8fa; --surface:#ffffff; --surface-2:#eef2f6; --text:#18202a; --muted:#5a6573; --line:#d8dee6;
+  --accent:#2b5c8a; --accent-soft:#e3edf7; --ok:#1f7a4d; --warn:#9a6400; --crit:#a33a3a;
+  --code-bg:#0f1720; --code-text:#e6edf3; --radius:12px; --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 16px rgba(16,24,40,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c25; --surface-2:#1c2531; --text:#e4e9ef; --muted:#9aa6b4; --line:#2a3542;
+    --accent:#7fb2e5; --accent-soft:#1d2b3b; --ok:#5cc596; --warn:#e0b25b; --crit:#e88a8a;
+    --code-bg:#0a0f15; --code-text:#e6edf3; --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c25; --surface-2:#1c2531; --text:#e4e9ef; --muted:#9aa6b4; --line:#2a3542;
+  --accent:#7fb2e5; --accent-soft:#1d2b3b; --ok:#5cc596; --warn:#e0b25b; --crit:#e88a8a;
+  --code-bg:#0a0f15; --code-text:#e6edf3; --shadow:none;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+.wrap{max-width:1040px;margin:0 auto;padding:0 16px}
+nav.top{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+nav.top .wrap{display:flex;align-items:center;gap:20px;height:56px;overflow-x:auto;white-space:nowrap}
+nav.top .brand{font-weight:700;letter-spacing:.06em;color:var(--text);text-decoration:none}
+nav.top a.l{color:var(--muted);text-decoration:none;font-size:14px}
+nav.top a.l:hover{color:var(--text)}
+nav.top .sp{flex:1}
+#theme{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px}
+header.hero{padding:72px 0 40px}
+.eyebrow{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600}
+h1{font-size:clamp(32px,5.2vw,52px);line-height:1.1;margin:10px 0 16px;letter-spacing:-.02em}
+.lead{font-size:clamp(17px,2.2vw,20px);color:var(--muted);max-width:720px;margin:0 0 28px}
+.btns{display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px}
+.btn.primary{background:var(--accent);color:var(--bg)}
+.btn.ghost{border:1px solid var(--line);color:var(--text)}
+section{padding:48px 0;border-top:1px solid var(--line)}
+h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px;letter-spacing:-.01em}
+h3{font-size:18px;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 28px;max-width:720px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
+.card .who{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.badge{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:700}
+.card p{margin:4px 0 10px;color:var(--muted);font-size:15px}
+.card ul{margin:0;padding-left:18px;font-size:14px}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted);margin-left:auto}
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;overflow-x:auto}
+.diagram svg{display:block;min-width:760px;width:100%;height:auto}
+.diagram svg .box{fill:var(--surface-2);stroke:var(--line)}
+.diagram svg .box.you{fill:var(--accent-soft);stroke:var(--accent)}
+.diagram svg text{fill:var(--text);font:600 14px -apple-system,Segoe UI,Roboto,sans-serif}
+.diagram svg text.s{fill:var(--muted);font-weight:400;font-size:12px}
+.diagram svg text.g{fill:var(--accent);font-size:12px}
+.diagram svg .arrow{stroke:var(--muted);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+.diagram svg .loop{stroke:var(--accent);stroke-width:1.6;fill:none;stroke-dasharray:5 4;marker-end:url(#ah2)}
+.diagram svg .band{fill:none;stroke:var(--line);stroke-dasharray:3 4}
+table{width:100%;border-collapse:collapse;font-size:15px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:var(--surface-2);font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+tr:last-child td{border-bottom:none}
+.tbl{overflow-x:auto;border-radius:var(--radius)}
+.lvl{font-weight:700}
+.lvl.l{color:var(--ok)} .lvl.s{color:var(--warn)} .lvl.c{color:var(--crit)}
+pre{position:relative;background:var(--code-bg);color:var(--code-text);padding:16px 18px;border-radius:10px;overflow-x:auto;font:13.5px/1.55 "SF Mono",Menlo,Consolas,monospace;margin:10px 0 18px}
+code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.92em}
+p code,li code,td code{background:var(--surface-2);padding:1px 5px;border-radius:5px}
+.copy{position:absolute;top:8px;right:8px;background:#ffffff1a;color:#cfd8e3;border:1px solid #ffffff2a;border-radius:6px;font-size:12px;padding:3px 8px;cursor:pointer}
+.tabs{display:flex;gap:6px;margin-bottom:-1px}
+.tabs button{border:1px solid var(--line);border-bottom:none;background:var(--surface-2);color:var(--muted);padding:8px 16px;border-radius:10px 10px 0 0;cursor:pointer;font-weight:600}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--text)}
+.panel{border:1px solid var(--line);background:var(--surface);border-radius:0 var(--radius) var(--radius) var(--radius);padding:16px 18px}
+.panel[hidden]{display:none}
+ol.steps{list-style:none;padding:0;margin:0;counter-reset:s}
+ol.steps li{counter-increment:s;position:relative;padding:0 0 22px 52px}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:34px;height:34px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:700}
+ol.steps li h3{margin-top:4px}
+ol.steps li p{margin:4px 0;color:var(--muted)}
+.two{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
+.two>*,.grid>*{min-width:0}
+.log{font:12.5px/1.6 "SF Mono",Menlo,Consolas,monospace;background:var(--code-bg);color:var(--code-text);border-radius:10px;padding:14px 16px;overflow-x:auto;white-space:pre}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:10px}
+summary{cursor:pointer;font-weight:600}
+details p{color:var(--muted);margin:8px 0 2px}
+footer{padding:36px 0 60px;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+@media (max-width:640px){header.hero{padding:44px 0 28px} section{padding:36px 0} nav.top a.l.opt{display:none}}
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Sections">
+  <div class="wrap">
+    <a class="brand" href="#">ATLAS</a>
+    <a class="l" href="#how">How it works</a>
+    <a class="l" href="#agents">Agents</a>
+    <a class="l opt" href="#tracker">Tracker</a>
+    <a class="l" href="#install">Install</a>
+    <a class="l" href="#walkthrough">Walkthrough</a>
+    <a class="l opt" href="#commands">Commands</a>
+    <span class="sp"></span>
+    <button id="theme" type="button" aria-label="Toggle colour theme">Theme</button>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Open-source plugin · Claude Code &amp; Codex</div>
+    <h1>An agent team that runs your client projects — from first meeting to handover.</h1>
+    <p class="lead">You build the software. ATLAS handles everything around it: discovery, design, planning, testing, gates, reports and handover. It also keeps a tamper-evident record of the project and reads the real state of your code from git, so the tracker stays accurate even when nobody updates it.</p>
+    <div class="btns">
+      <a class="btn primary" href="#install">Install</a>
+      <a class="btn ghost" href="#walkthrough">See a project end to end</a>
+    </div>
+  </div>
+</header>
+
+<section id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">Each stage belongs to one agent and ends at a gate. Build, test and release repeat for every phase. Atlas watches the whole flow and tells you what needs attention and what comes next.</p>
+    <div class="diagram" role="img" aria-label="Flow: Alice defines, gate G1, Stark designs, G2, Jarvis plans, G3, you build, G4, Sentinel tests, G5, release; loop back to build for the next phase; Alice hands over after the last phase. Atlas watches throughout; Spartan runs every gate; change requests go back to Alice.">
+      <svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--muted)"/></marker>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker>
+        </defs>
+        <rect class="band" x="10" y="8" width="960" height="34" rx="8"/>
+        <text x="24" y="30">Atlas</text><text class="s" x="76" y="30">project manager — watches git, pull requests and CI · status · log · next step</text>
+        <g>
+          <rect class="box" x="10" y="80" width="118" height="64" rx="10"/><text x="24" y="106">Alice</text><text class="s" x="24" y="126">define</text>
+          <rect class="box" x="168" y="80" width="118" height="64" rx="10"/><text x="182" y="106">Stark</text><text class="s" x="182" y="126">design</text>
+          <rect class="box" x="326" y="80" width="118" height="64" rx="10"/><text x="340" y="106">Jarvis</text><text class="s" x="340" y="126">plan</text>
+          <rect class="box you" x="484" y="80" width="118" height="64" rx="10"/><text x="498" y="106">You</text><text class="s" x="498" y="126">build a phase</text>
+          <rect class="box" x="642" y="80" width="118" height="64" rx="10"/><text x="656" y="106">Sentinel</text><text class="s" x="656" y="126">test · UAT</text>
+          <rect class="box" x="800" y="80" width="118" height="64" rx="10"/><text x="814" y="106">Release</text><text class="s" x="814" y="126">phase done</text>
+        </g>
+        <path class="arrow" d="M128 112 H166"/><text class="g" x="137" y="102">G1</text>
+        <path class="arrow" d="M286 112 H324"/><text class="g" x="295" y="102">G2</text>
+        <path class="arrow" d="M444 112 H482"/><text class="g" x="453" y="102">G3</text>
+        <path class="arrow" d="M602 112 H640"/><text class="g" x="611" y="102">G4</text>
+        <path class="arrow" d="M760 112 H798"/><text class="g" x="769" y="102">G5</text>
+        <path class="loop" d="M859 146 C 859 186, 543 186, 543 148"/><text class="s" x="668" y="200">next phase</text>
+        <path class="arrow" d="M918 112 C 960 112, 960 220, 900 220"/>
+        <rect class="box" x="760" y="200" width="138" height="40" rx="10"/><text x="772" y="225">Alice · handover</text>
+        <rect class="band" x="150" y="200" width="420" height="40" rx="8"/>
+        <text x="164" y="225">Spartan</text><text class="s" x="232" y="225">runs every gate · security reviews of Critical modules</text>
+        <path class="loop" d="M720 282 H100 C 69 282, 69 230, 69 148"/><text class="s" x="300" y="274">change request → Alice → only the affected parts are redone</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section id="agents">
+  <div class="wrap">
+    <h2>The agents</h2>
+    <p class="sub">Each agent is a skill you can run on its own. They all follow one shared contract: the same IDs, the same project folder and the same event log.</p>
+    <div class="grid">
+      <div class="card"><div class="who"><span class="badge">A</span><h3>Atlas</h3><span class="tag">PM</span></div>
+        <p>Creates projects, tracks the real build, and decides what comes next.</p>
+        <ul><li>Reads commits, PRs and CI since the last run</li><li>Attention list, Critical items first</li><li>Change requests with impact analysis</li><li>Sign-offs, releases, timeline</li></ul></div>
+      <div class="card"><div class="who"><span class="badge">Al</span><h3>Alice</h3><span class="tag">discovery</span></div>
+        <p>Turns meeting transcripts and documents into the source of truth. She never guesses.</p>
+        <ul><li>Detailed internal PRD with every statement traced to its source</li><li>Plain-language client proposal (PDF)</li><li>Questions file for the client</li><li>Client updates and handover pack</li></ul></div>
+      <div class="card"><div class="who"><span class="badge">S</span><h3>Stark</h3><span class="tag">design</span></div>
+        <p>Designs the system in proportion to its size.</p>
+        <ul><li>Architecture, data model, APIs, state machines</li><li>Requirements with acceptance criteria</li><li>Modules with proposed rigour levels</li></ul></div>
+      <div class="card"><div class="who"><span class="badge">J</span><h3>Jarvis</h3><span class="tag">plan</span></div>
+        <p>Turns the design into phases and work packages you can build.</p>
+        <ul><li>Dependencies and parallel lanes</li><li>Briefs for coding agents</li><li>Audit of existing code against requirements</li></ul></div>
+      <div class="card"><div class="who"><span class="badge">Se</span><h3>Sentinel</h3><span class="tag">test</span></div>
+        <p>Tests each phase against its acceptance criteria.</p>
+        <ul><li>Test plan scaled to rigour</li><li>Client UAT script (PDF)</li><li>Go-live checklist and rollback plan</li></ul></div>
+      <div class="card"><div class="who"><span class="badge">Sp</span><h3>Spartan</h3><span class="tag">gates</span></div>
+        <p>Concrete pass/fail gates, not a rubber stamp.</p>
+        <ul><li>G1–G5 checks, scripted where possible</li><li>Security review of Critical modules</li><li>Waivers only with a recorded reason</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<section id="tracker">
+  <div class="wrap">
+    <h2>A tracker that works like <code>.git</code></h2>
+    <p class="sub">Every meaningful action adds one line to an append-only, hash-chained log. Status pages are generated from that log and from the code itself, so nothing has to be kept up to date by hand.</p>
+    <div class="two">
+      <div>
+        <div class="log">#12 2026-11-02 alice   doc.version       PRD v0.3: 4 new FRs from M03
+#15 2026-11-04 atlas   signoff.recorded  Proposal v1.0 approved by Owner
+#16 2026-11-04 spartan gate.passed       G1 passed: 5 checks
+#21 2026-11-06 atlas   rigour.set        M2 Payments → Critical
+#34 2026-11-12 atlas   cr.opened         CR-01 Add delivery tracking
+#40 2026-11-20 spartan gate.passed       G5/P1 passed
+#41 2026-11-20 atlas   phase.released    P1 released</div>
+      </div>
+      <div class="card">
+        <h3>Why it stays accurate</h3>
+        <ul>
+          <li><strong>Derived:</strong> progress comes from git, PRs and CI, read incrementally from the last commit Atlas saw.</li>
+          <li><strong>Matched three ways:</strong> IDs like <code>WP-07</code> in branches or commits, otherwise file paths mapped to modules, otherwise Atlas asks you once and remembers the answer.</li>
+          <li><strong>Honest confidence:</strong> <em>verified</em> (tests or CI pass), <em>likely</em> (code exists), <em>claimed</em> (only recorded).</li>
+          <li><strong>Tamper-evident:</strong> <code>atlasctl verify-log</code> detects any edit to past events. Snapshots prove what the client approved.</li>
+        </ul>
+      </div>
+    </div>
+    <h3 style="margin-top:28px">Rigour, set per module</h3>
+    <p class="sub">Payments and logins get heavy scrutiny; a settings page doesn't. Stark proposes each module's level with a reason, and you confirm it.</p>
+    <div class="tbl"><table>
+      <thead><tr><th></th><th><span class="lvl l">Light</span></th><th><span class="lvl s">Standard</span></th><th><span class="lvl c">Critical</span></th></tr></thead>
+      <tbody>
+        <tr><td>Design</td><td>Use cases and acceptance criteria</td><td>+ data model, flows, API contracts</td><td>+ edge cases, failure and rollback behaviour, threat notes</td></tr>
+        <tr><td>Plan</td><td>1–2 work packages</td><td>Normal work packages</td><td>Small work packages with review checkpoints</td></tr>
+        <tr><td>“Done” means</td><td>Code exists</td><td>Tests pass</td><td>Verified, each criterion checked, and signed off</td></tr>
+        <tr><td>Tests</td><td>Smoke test + UAT</td><td>Unit and integration tests</td><td>+ edge, failure, permission and end-to-end tests</td></tr>
+        <tr><td>Gates</td><td>Basic</td><td>Standard list</td><td>Full list + security review of every change</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="sub">You need git, Python 3.9+, and Claude Code or Codex. Optional: Chrome, Edge or Chromium (for client PDFs) and the GitHub CLI (for GitHub storage).</p>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" aria-controls="t-claude" id="b-claude">Claude Code</button>
+      <button role="tab" aria-selected="false" aria-controls="t-codex" id="b-codex">Codex</button>
+      <button role="tab" aria-selected="false" aria-controls="t-local" id="b-local">From a clone</button>
+    </div>
+    <div class="panel" id="t-claude" role="tabpanel" aria-labelledby="b-claude">
+<pre><code>claude plugin marketplace add &lt;github-user&gt;/atlas-plugin
+claude plugin install atlas@atlas</code></pre>
+      Then, in Claude Code, type <code>/atlas</code> or simply ask, e.g. “set up atlas”.
+    </div>
+    <div class="panel" id="t-codex" role="tabpanel" aria-labelledby="b-codex" hidden>
+<pre><code>codex plugin marketplace add &lt;github-user&gt;/atlas-plugin
+codex plugin add atlas@atlas</code></pre>
+      Then, in Codex, mention <code>$atlas</code> or simply ask, e.g. “set up atlas”.
+    </div>
+    <div class="panel" id="t-local" role="tabpanel" aria-labelledby="b-local" hidden>
+<pre><code>git clone https://github.com/&lt;github-user&gt;/atlas-plugin.git
+cd atlas-plugin
+./install.sh            # installs into Claude Code and Codex if found</code></pre>
+    </div>
+
+    <h3 style="margin-top:32px">Set up once per device</h3>
+    <p class="sub">Choose where project records live. Both modes use the same structure, and a folder-mode project can move to GitHub later with one command.</p>
+    <div class="two">
+      <div class="card"><h3>GitHub mode <span class="tag">recommended</span></h3>
+        <p>Each project is a <strong>private repo</strong> in your account, and a private <code>atlas-registry</code> repo lists them all. Every device sees every project. You log in yourself; ATLAS never sees your password.</p>
+<pre><code>gh auth login
+python3 lib/atlasctl.py setup --mode github</code></pre></div>
+      <div class="card"><h3>Folder mode</h3>
+        <p>Paste a path: a local folder, or one synced by Dropbox, iCloud or a shared drive. Good for working alone or offline.</p>
+<pre><code>python3 lib/atlasctl.py setup --mode folder \
+  --path ~/AtlasProjects</code></pre></div>
+    </div>
+    <p class="sub" style="margin-top:12px">When ATLAS is installed as a plugin, the agent runs these commands for you. Just say “set up atlas”.</p>
+  </div>
+</section>
+
+<section id="walkthrough">
+  <div class="wrap">
+    <h2>A project, end to end</h2>
+    <p class="sub">Everything below is a chat command or plain request in Claude Code or Codex.</p>
+    <ol class="steps">
+      <li><h3>Create the project</h3><p><code>/atlas new Bakery Orders</code> creates <code>PRJ-0001</code> and asks for the client, size, author and code repo.</p></li>
+      <li><h3>Discovery with Alice</h3><p>Drop meeting transcripts, notes and SOPs into <code>discovery/sources/</code> and run <code>/alice</code>. You get the internal PRD, the client proposal and the questions for the client. Alice asks you about anything unclear.</p></li>
+      <li><h3>Client sign-off</h3><p>Send the proposal PDF from <code>~/Desktop/PRJ-0001-bakery-orders-for-client/</code>. When the client approves, say “record sign-off”; Atlas snapshots the exact documents.</p></li>
+      <li><h3>Design and plan</h3><p><code>/spartan G1</code> → <code>/stark</code> (confirm each module's rigour) → <code>/spartan G2</code> → <code>/jarvis</code> → <code>/spartan G3</code> → <code>atlasctl publish</code>, which copies the blueprint into your code repo's <code>docs/blueprint/</code>.</p></li>
+      <li><h3>You build</h3><p>Alone, with a team, or with coding agents. Collaborators need nothing installed. Branch names like <code>WP-07-checkout</code> make matching exact, but they are optional.</p></li>
+      <li><h3>Check in any time</h3><p><code>/atlas</code> reconciles new commits, PRs and CI, then tells you progress per phase, what needs attention (failing CI, stale PRs, drift, unanswered client questions, slippage) and the next step.</p></li>
+      <li><h3>Test and release each phase</h3><p><code>/spartan G4</code> → <code>/sentinel</code> (test plan, UAT script, go-live checklist) → client UAT sign-off → <code>/spartan G5</code> → <code>/atlas release P1</code>. Then on to the next phase.</p></li>
+      <li><h3>Report and hand over</h3><p><code>/alice report</code> writes a plain-language client update. After the last phase, <code>/alice handover</code> produces the handover pack. Both are exported as PDFs.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section id="commands">
+  <div class="wrap">
+    <h2>Command reference</h2>
+    <p class="sub">The agents run these for you, but you can also run them yourself with <code>python3 lib/atlasctl.py …</code>.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>status</code></td><td>Reconcile code, then show stages, phases, attention list and next step</td></tr>
+        <tr><td><code>new · projects · use · link-repo</code></td><td>Create, list, switch projects; link a local clone of a code repo</td></tr>
+        <tr><td><code>unmatched · learn · resolve · wp</code></td><td>Classify commits once (remembered); record a work package's state</td></tr>
+        <tr><td><code>signoff · decision · rigour</code></td><td>Record client approvals (with snapshots), decisions, module rigour</td></tr>
+        <tr><td><code>gate G1…G5 [--phase] [--record] [--waive]</code></td><td>Run, record or waive a gate</td></tr>
+        <tr><td><code>cr open · impact · cr approved|done</code></td><td>Change requests and their downstream impact</td></tr>
+        <tr><td><code>release P#</code></td><td>Mark a phase released after G5</td></tr>
+        <tr><td><code>log · show &lt;ID&gt; · verify-log</code></td><td>Timeline, one item's full story, integrity check</td></tr>
+        <tr><td><code>export · publish</code></td><td>Client PDFs to the Desktop outbox; blueprint into the code repo</td></tr>
+        <tr><td><code>sync · migrate --to github · doctor</code></td><td>Sync storage, move to GitHub, check dependencies</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>Questions</h2>
+    <details><summary>Where does client information go?</summary><p>Into the project's private storage: a private GitHub repo or your own folder. It never enters the code repositories that collaborators clone. Only the proposal, questions, UAT script, updates and handover pack are exported, as PDFs. The internal PRD is never exported.</p></details>
+    <details><summary>What if a teammate pushes code without the plugin?</summary><p>That's the normal case. Atlas reads their commits, branches, pull requests and CI the next time you run <code>/atlas</code>, and asks you about anything it can't match.</p></details>
+    <details><summary>Does it search the web with client details?</summary><p>No. Research queries are generic (industry, country, topic). Names, figures and anything confidential never leave your machine in a search.</p></details>
+    <details><summary>Can I add my own agent?</summary><p>Yes. Add a skill under <code>skills/</code> that follows <code>CONTRACT.md</code>, then add a row to <code>pipeline.md</code>.</p></details>
+    <details><summary>Does it write code?</summary><p>No. ATLAS plans, tracks, tests and documents. You or your coding agents build, using the published blueprint and the work-package briefs.</p></details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">ATLAS is open source under the MIT licence. Works with Claude Code and OpenAI Codex.</div>
+</footer>
+
+<script>
+(function(){
+  var root=document.documentElement, btn=document.getElementById('theme');
+  try{var t=localStorage.getItem('atlas-theme'); if(t) root.setAttribute('data-theme',t);}catch(e){}
+  btn.addEventListener('click',function(){
+    var dark=root.getAttribute('data-theme')==='dark'||(!root.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme: dark)').matches);
+    var next=dark?'light':'dark'; root.setAttribute('data-theme',next);
+    try{localStorage.setItem('atlas-theme',next);}catch(e){}
+  });
+  document.querySelectorAll('[role=tab]').forEach(function(tab){
+    tab.addEventListener('click',function(){
+      document.querySelectorAll('[role=tab]').forEach(function(t){t.setAttribute('aria-selected','false');document.getElementById(t.getAttribute('aria-controls')).hidden=true;});
+      tab.setAttribute('aria-selected','true');document.getElementById(tab.getAttribute('aria-controls')).hidden=false;
+    });
+  });
+  document.querySelectorAll('pre').forEach(function(pre){
+    var b=document.createElement('button');b.className='copy';b.type='button';b.textContent='Copy';
+    b.addEventListener('click',function(){
+      var txt=pre.innerText.replace(/\nCopy$/,'');
+      (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)}).catch(function(){b.textContent='Select & copy'});
+    });
+    pre.appendChild(b);
+  });
+})();
+</script>
+</body>
+</html>

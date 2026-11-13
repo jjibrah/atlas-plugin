@@ -1,0 +1,23 @@
+{
+  "name": "atlas",
+  "version": "1.0.0",
+  "description": "A project-management team for client software projects: Atlas (PM and tracker), Alice (discovery), Stark (design), Jarvis (plan), Sentinel (test and release) and Spartan (gates).",
+  "author": { "name": "ATLAS contributors" },
+  "license": "MIT",
+  "keywords": ["project-management", "prd", "requirements", "architecture", "planning", "testing", "security"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ATLAS",
+    "shortDescription": "From client meeting to handover, tracked",
+    "longDescription": "Six agents that turn meeting transcripts into a PRD and proposal, design and plan the system, track the real build from git, run test and release gates, and produce client reports and a handover pack — with a tamper-evident project log.",
+    "developerName": "ATLAS contributors",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Set up atlas and create a new project",
+      "Where are we on this project?",
+      "Process the new meeting transcripts"
+    ],
+    "brandColor": "#2B5C8A"
+  }
+}

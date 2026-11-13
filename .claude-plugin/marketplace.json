@@ -1,0 +1,14 @@
+{
+  "name": "atlas",
+  "owner": { "name": "ATLAS contributors" },
+  "metadata": { "description": "ATLAS — an agent team that takes client software projects from first meeting to handover." },
+  "plugins": [
+    {
+      "name": "atlas",
+      "source": "./",
+      "description": "Atlas (PM), Alice (discovery), Stark (design), Jarvis (plan), Sentinel (test), Spartan (gates).",
+      "version": "1.0.0",
+      "category": "productivity"
+    }
+  ]
+}

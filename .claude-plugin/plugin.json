@@ -1,0 +1,8 @@
+{
+  "name": "atlas",
+  "version": "1.0.0",
+  "description": "A project-management team for client software projects: Atlas (PM and tracker), Alice (discovery, PRD, proposal, reports, handover), Stark (design), Jarvis (plan), Sentinel (test and release) and Spartan (risk and security gates).",
+  "author": { "name": "ATLAS contributors" },
+  "license": "MIT",
+  "keywords": ["project-management", "prd", "requirements", "architecture", "planning", "testing", "security", "tracker"]
+}
