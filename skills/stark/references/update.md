@@ -11,7 +11,7 @@ For a design that already exists: the PRD changed, questions were answered, or a
    - removed or descoped FR → strike the row's ID `~~REQ-012~~ (removed v1.1: reason)` **and** set its Status to `out of scope (removed v1.1)` — gates count a row as live unless its Status says out of scope, deferred, rejected or removed.
 3. **Answered questions** (a note from Alice, or the PRD now says): set the OQ's Status to `answered`, add the answer and date, and update every place that relied on the default. Close the note: `atlas note-done N-## --reply "…" --from stark`.
 4. **Rigour:** re-check the signals of each affected module. A new risk signal raises the level — tell the user and confirm with `atlas rigour M# <Level> --reason "…"`, then adjust that module's depth.
-5. **Spec:** change only the affected sections (and the overview, if one exists); new criteria as `AC-NEW` → `register.py number-ac <D>`; remove citations of struck REQs; add a changelog row and bump the `| Version |` row.
+5. **Spec:** change only the affected sections (and the overview and the diagram pack `DIAGRAMS.md`, if they exist: redraw only the pictures the change touches, new version, export again); new criteria as `AC-NEW` → `register.py number-ac <D>`; remove citations of struck REQs; add a changelog row and bump the `| Version |` row.
 6. `register.py trace <D>`, then `atlas finish stark`. If the plan exists, status will report it is behind the design — the next step is `/jarvis plan` (small track: update PLAN.md yourself, see small-track.md).
 
 ## Change request (`/stark cr CR-##`)

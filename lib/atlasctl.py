@@ -124,8 +124,10 @@ def glob_re(pattern: str) -> "re.Pattern[str]":
 def load_config() -> Dict[str, Any]:
     cfg = read_json(CONFIG, None)
     if cfg is None:
-        die("not set up on this device. Run: python3 %s setup --mode folder --path <projects folder>  "
-            "(or --mode github)" % (LIB / "atlasctl.py"))
+        die("ATLAS is not set up on this device yet. `atlas start \"<client or project name>\"` sets it up with a "
+            "projects folder at ~/AtlasProjects and creates the project. To choose the storage yourself: "
+            "`atlas setup --mode folder --path <folder>` or `atlas setup --mode github`.  (atlas = python3 %s)"
+            % (LIB / "atlasctl.py"))
     return cfg
 
 
@@ -287,7 +289,9 @@ def find_project(cfg: Dict[str, Any], ref: Optional[str]) -> Project:
     cur = cfg.get("current")
     if cur:
         return find_project(cfg, cur)
-    die("no current project. Use --project PRJ-xxxx, `atlasctl use PRJ-xxxx`, or `atlasctl new`.")
+    die("there is no project yet. Create one: `atlas start \"<client or project name>\" [--files <folder>]` "
+        "(a possible client you are still talking to: `atlas lead new \"<client>\"`). "
+        "Existing ones: `atlas projects`, then `atlas use PRJ-xxxx`.")
     raise SystemExit  # for type checkers
 
 
@@ -943,6 +947,9 @@ def build_status(project: Project, rec: Optional[Dict[str, Any]] = None) -> Dict
         if c["state"] in ("opened", "approved"):
             att.append((1, "%s is %s: %s" % (cid, c["state"], c["title"])))
     import flow  # noqa: E402  (stamps and notes live there)
+    import intel  # noqa: E402
+    att += intel.lead_attention(project, evs)
+    att += intel.scope_attention(project, evs)
     for line in flow.stale_lines(project):
         att.append((1, line))
     notes = flow.open_notes(evs)
@@ -954,11 +961,15 @@ def build_status(project: Project, rec: Optional[Dict[str, Any]] = None) -> Dict
     att.sort(key=lambda x: x[0])
 
     ni = next_step(project, stages, gates, phases, wp_rows, released, current_phase)
+    lead = intel.lead_state(evs)
+    if lead["status"] == "lost":
+        ni = {"text": "Closed: the lead was lost (%s)." % (lead["reason"] or "no reason recorded"), "agent": "",
+              "gate": "", "phase": "", "interactive": False}
     return {"stages": stages, "assumed": assumed, "gates": gates, "phases": phases, "wps": wp_rows,
             "modules": modules, "released": released, "current_phase": current_phase,
             "attention": [a[1] for a in att], "next": ni["text"], "next_info": ni, "crs": crs,
             "unmatched": unmatched, "rec": rec, "questions": (q_total, q_block), "track": track(project),
-            "notes": notes}
+            "notes": notes, "lead": lead}
 
 
 def test_status(project: Project) -> Dict[str, str]:
@@ -1434,7 +1445,7 @@ def status_summary(p: Project, s: Dict[str, Any]) -> Dict[str, Any]:
                     "total": sum(1 for w in s["wps"] if w["phase"] == ph["id"])} for ph in s["phases"]],
         "open_work": [{k: w[k] for k in ("id", "title", "state", "level", "confidence")} for w in s["wps"]
                       if w["phase"] == cur and w["state"] not in ("done", "deferred")],
-        "notes": len(s["notes"]), "questions_open": s["questions"][0], "questions_blocking": s["questions"][1],
+        "lead": s["lead"]["status"], "notes": len(s["notes"]), "questions_open": s["questions"][0], "questions_blocking": s["questions"][1],
         "ci": {k: (v or {}).get("conclusion") for k, v in (s["rec"].get("ci") or {}).items()},
     }
 
@@ -1620,6 +1631,9 @@ def cmd_signoff(a: argparse.Namespace) -> None:
                  refs=[x for x in md.ids_in(a.what)] + ([("snapshot:" + snap)] if snap else []),
                  data={"what": a.what, "by": a.by, "date": a.date or today(), "evidence": a.evidence or "",
                        "snapshot": snap, "files": man, "phase": a.phase or ""}, by="user")
+    if not a.phase and "uat" not in a.what.lower():
+        import intel  # noqa: E402
+        intel.set_baseline(p, "signoff")
     p.sync_push("Sign-off: %s" % a.what)
     print("Sign-off recorded%s." % ((" and snapshot saved in snapshots/" + snap) if snap else ""))
 
@@ -1665,6 +1679,8 @@ def cmd_cr(a: argparse.Namespace) -> None:
         die("%s was never opened" % cid)
     append_event(p, "cr.%s" % a.action, "atlas", "%s %s%s" % (cid, a.action, (": " + a.note) if a.note else ""),
                  refs=[cid], data={"cr": cid, "note": a.note or ""}, by="user")
+    import intel  # noqa: E402
+    intel.on_cr_decided(p, cid, a.action, a.note or "")
     p.sync_push("%s %s" % (cid, a.action))
     print("%s marked %s." % (cid, a.action))
 
@@ -1881,7 +1897,7 @@ def cmd_export(a: argparse.Namespace) -> None:
     for f in a.files:
         src = (p.path / f) if not os.path.isabs(f) else Path(f)
         rel = str(src.resolve()).replace(str(p.path.resolve()) + os.sep, "")
-        if any(rel.startswith(b) for b in blocked) and not a.allow_internal:
+        if any(rel.startswith(b) for b in blocked) and rel != "design/DIAGRAMS.md" and not a.allow_internal:
             die("%s is internal and is never sent to the client (use --allow-internal only if you are sure)" % rel)
         if not src.exists():
             die("not found: %s" % src)
@@ -2023,6 +2039,15 @@ def cmd_handover_data(a: argparse.Namespace) -> None:
 
 HELP = """atlasctl — ATLAS project manager core
 
+Start here
+  start "<client or project>" [--files <folder>…] [--client C] [--size S] [--author A]
+                                 from nothing to a project: sets up this device if needed, takes in the files
+  lead new "<client>" [--contact …] [--source …]   a possible client you are still talking to
+  lead note "<text>" · lead sent ["Proposal v1.0"] [--followup +5d] · lead followup +5d · lead won · lead lost --reason "…"
+  pipeline                       every client and project: where it is, days waiting, what needs you
+  scope [--cr] [--baseline "<why>"]   what changed since the client signed (or since the proposal was sent)
+  set size|client|author|name <value>
+
 Setup and projects
   setup --mode folder --path <dir> | --mode github [--owner X] [--path <local clones>] [--no-deps]
   doctor                         check dependencies
@@ -2116,6 +2141,17 @@ def main() -> None:
     x.add_argument("--from", dest="sender")
     x = sp("intake", flow.cmd_intake); x.add_argument("paths", nargs="+")
     x.add_argument("--to", default="discovery", choices=["discovery", "design"])
+    import intel  # noqa: E402
+    x = sp("start", intel.cmd_start); x.add_argument("name"); x.add_argument("--client"); x.add_argument("--size")
+    x.add_argument("--author"); x.add_argument("--repo", action="append"); x.add_argument("--files", nargs="*")
+    x.add_argument("--lead", action="store_true"); x.add_argument("--contact"); x.add_argument("--source")
+    x.add_argument("--note")
+    x = sp("set", intel.cmd_set); x.add_argument("key"); x.add_argument("value")
+    x = sp("lead", intel.cmd_lead); x.add_argument("action", choices=["new", "note", "sent", "followup", "won", "lost"])
+    x.add_argument("text", nargs="?"); x.add_argument("--contact"); x.add_argument("--source"); x.add_argument("--note")
+    x.add_argument("--followup"); x.add_argument("--reason"); x.add_argument("--files", nargs="*")
+    sp("pipeline", intel.cmd_pipeline)
+    x = sp("scope", intel.cmd_scope); x.add_argument("--cr", nargs="?", const="auto"); x.add_argument("--baseline")
     x = sp("stage", flow.cmd_stage); x.add_argument("name"); x.add_argument("state", choices=["done", "skipped", "reset"])
     x.add_argument("--reason", required=True)
     x = sp("unmatched", cmd_unmatched); x.add_argument("--limit", type=int, default=40)

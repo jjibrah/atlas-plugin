@@ -49,13 +49,9 @@ Write `AC-NEW`, then `register.py number-ac <D>` (IDs are global, sequential, pe
 | Components; sequence diagrams for critical flows (payments, auth, integrations) | `flowchart`, `sequenceDiagram` | Medium |
 | Deployment | `flowchart` | Large |
 
-Split a diagram that passes ~25 nodes. Syntax that breaks rendering (verify warns on the first two):
+Syntax that breaks rendering: read `references/diagrams.md` §2 once (verify warns on hyphenated or `end` node IDs and fails an empty diagram).
 
-- Node IDs are letters, digits and underscores — no hyphens (`admin_web`), and never `end`.
-- Quote any label with spaces, punctuation or parentheses: `A["Admin dashboard (web)"]`.
-- One diagram per code block; an empty diagram fails verify.
-- `stateDiagram-v2`: single-word state names (`state "Awaiting payment" as awaiting_payment`); no colons inside transition labels.
-- `erDiagram`: entity names without spaces; attributes as `type name PK "comment"`.
+**A diagram pack exists (`<D>/DIAGRAMS.md`, the pictures the client saw):** build on it instead of redrawing. Keep its names for roles, records, states and parts; the design's diagrams add the technical detail (IDs, fields, modules). Link it from TECHNICAL.md's introduction (`[DIAGRAMS.md](DIAGRAMS.md)`). Where the design has to differ from a picture (a state added, a part split), change the pack in the same run: new version, a changelog row, `atlas export design/DIAGRAMS.md`, and tell the user the client's pictures changed.
 
 ## 4. DECISIONS.md (Medium / Large)
 

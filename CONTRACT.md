@@ -18,6 +18,9 @@ The interface every agent in this plugin follows: where things live, which IDs e
 - **Gates run by themselves**, in `finish` and in `atlas status`. A gate that passes is recorded; one with open items is listed under "To pass G#". Spartan is only needed for waivers, security reviews, or when a failure needs explaining.
 - **Staleness.** `finish` records a fingerprint of the upstream rows a run used (PRD requirements for Stark; REQs and criteria for Jarvis; both for Sentinel). Status reports when those rows change afterwards.
 - **Tracks.** A `Small` project is on the `small` track: Stark writes the design and the plan in one run (`finish stark` closes both stages). Everything else is `standard`.
+- **The front door.** `atlas start "<client or project>" [--files <folder>…]` needs nothing set up: on a new device it creates a folder-mode setup at `~/AtlasProjects`, then the project (size `Small` until `atlas set size …`), and takes in the files. `atlas lead new "<client>"` is the same with a `lead.created` event. A lead is an ordinary project; `atlas pipeline` lists them all.
+- **Scope watch.** `atlas lead sent` and `atlas signoff` (not a phase or UAT sign-off) freeze the PRD's FR / BR rows in `state/baseline.json`. Status reports any later difference until it is settled: `atlas scope` shows it; `atlas scope --cr` opens a change request carrying the differing IDs; `atlas cr approved` moves the baseline for those IDs; `atlas cr rejected` leaves a note for Alice, who puts the PRD back; `atlas scope --baseline "<why>"` accepts the PRD as it is. Agents never edit the baseline.
+- **Diagram pack.** `/stark diagrams` runs as `begin stark --stage none` … `finish stark --stage none`; while `design/TECHNICAL.md` does not exist, that `finish` runs no check (Stark runs `verify.py <P>/design --diagrams` itself).
 - **Progress is inferred.** A work package moves to *in-progress* on its first matching commit, branch or pull request, and to *done* when its branch or pull request is merged, or a commit on the default branch says so ("WP-07 done", "closes WP-07"). What the user records with `atlas wp` always wins.
 
 ## 1. Paths
@@ -32,13 +35,14 @@ The interface every agent in this plugin follows: where things live, which IDs e
 ├── project.md               generated summary
 ├── log/events.jsonl         append-only, hash-chained event log                  (atlasctl only)
 ├── snapshots/               documents frozen at milestones                        (atlasctl only)
-├── state/                   mapping.json · reconcile.json · stamps.json · lock     (atlasctl only)
+├── state/                   mapping.json · reconcile.json · stamps.json · baseline.json · lock   (atlasctl only)
 ├── discovery/               ALICE
 │   ├── sources/             client files dropped here by the user (never modified)
 │   ├── PRD.md  PROPOSAL.md  QUESTIONS.md
 │   └── _work/               STATE.md · sources/ (chunks) · meetings/ · research.md · proposal-basis.json
 ├── design/                  STARK
 │   ├── TECHNICAL.md (+ technical/*.md, DECISIONS.md, OVERVIEW.md)
+│   ├── DIAGRAMS.md          the diagram pack: plain-language pictures for the client (optional)
 │   ├── MODULES.md           module · rigour · code paths  (read by atlasctl)
 │   ├── sources/             extra technical documents (optional)
 │   └── _work/               STATE.md · requirements.md · ledger.md · traceability.md · sources/
@@ -52,7 +56,7 @@ The interface every agent in this plugin follows: where things live, which IDs e
 ```
 
 - **Code repositories are read-only** for every agent, with one exception: `atlasctl publish` copies the technical blueprint (design/ + plan/, never discovery/ or reports/) into a code repo's `docs/blueprint/` after the user confirms. Coding agents read it there.
-- **Client outbox:** `~/Desktop/<PRJ-id>-<slug>-for-client/` — PDFs only, produced by `atlasctl export`. The internal PRD, design and plan are never exported.
+- **Client outbox:** `~/Desktop/<PRJ-id>-<slug>-for-client/` — PDFs only, produced by `atlasctl export`. The internal PRD, design and plan are never exported, with one exception: the diagram pack `design/DIAGRAMS.md`, which is written for the client.
 - Agents write only inside their own folder (above). Everything else goes through `atlasctl`.
 
 ## 2. IDs
@@ -92,6 +96,16 @@ Each ID kind has one owner. IDs are permanent: never renumber, never reuse.
 
 A second optional table in PLAN.md, `| REQ | Evidence |`, lists requirements the audit found already built; gate G3 counts them as covered.
 
+**design/DIAGRAMS.md** — optional, written by `/stark diagrams`. Atlas only exports it (`atlas export design/DIAGRAMS.md`); `verify.py <P>/design --diagrams` checks it: a header table with a `| Version | v1.0 — YYYY-MM-DD |` row, no template leftovers, balanced code fences, at least three Mermaid diagrams, each starting with its diagram type, and no internal IDs inside a diagram. Each diagram has a "What this picture shows" sentence above it.
+
+**state/baseline.json** — the agreed scope, written by `atlasctl` only (`lead sent`, `signoff`, `cr approved`, `scope --baseline`):
+
+```
+{"kind": "sent" | "signoff", "date": "YYYY-MM-DD", "version": "<PRD version>",
+ "rows": {"FR-001": {"h": "<hash of requirement, priority, status>", "text": "…", "priority": "Must", "status": "confirmed", "source": "[M01@00:08:15]"}, "BR-01": {…}}}
+```
+The rows are read from the PRD's requirement and rule tables (`| ID | Requirement or Rule | … | Priority | Source | Status |`). A difference is a row added, a row whose requirement, priority or status changed, or a row removed (a row whose status became `out of scope`, `rejected` or `removed` counts as removed). `cr approved` replaces only the rows that change request carries; the other writers replace them all.
+
 **test/TEST-PLAN.md** — one `## P# — <phase name>` section per phase (Atlas looks for that heading), each with a table with `| TC | Covers | Module | Level | Type | Steps / expectation | Status |`, Covers listing AC/REQ IDs.
 
 ## 4. Events
@@ -113,6 +127,13 @@ python3 <lib>/atlasctl.py event <type> --actor <agent> --summary "<one line>" [-
 | A decision was agreed | `atlas decision "…"` (*agent*) |
 | A report was sent to the client | `report.sent` (*agent*, only when the user confirms it was sent) |
 | A security review was done | `review.security` (*agent*: Spartan) |
+| A possible client is recorded; something worth keeping happened | `lead.created` · `lead.note` — logged by `atlas lead new` / `lead note` |
+| The proposal went out; the follow-up date moved | `proposal.sent` (data: `what`, `followup`; also sets the baseline) · `lead.followup` (data: `on`) |
+| The client said yes or no | `lead.won` · `lead.lost` (data: `reason`) |
+| The PRD differs from the baseline | `scope.changed` (data: `added`, `changed`, `removed`, `key`) — logged by status, once per distinct set of differences |
+| The PRD was accepted as the new baseline | `scope.baseline` (data: `reason`) — logged by `atlas scope --baseline` |
+| A project detail was corrected | `project.updated` (data: `key`, `old`, `new`) — logged by `atlas set` |
+| Client or design files were taken in | `sources.added` (data: `count`, `to`) — logged by `atlas intake` and `atlas start --files` |
 
 Stage names: `define`, `design`, `plan`, `build`, `test`, `release`, `handover` (see `pipeline.md`).
 

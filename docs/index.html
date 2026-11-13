@@ -30,7 +30,7 @@
       <a class="l" href="#outputs">Documents</a>
       <a class="l" href="#tracker">Tracking</a>
       <a class="l" href="#walkthrough">Walkthrough</a>
-      <button class="motion" type="button" id="motion" aria-pressed="false">Pause motion</button>
+      <button class="motion" type="button" id="motion"><span class="ico" aria-hidden="true"></span><span class="t">Pause motion</span></button>
       <a class="btn solid" href="#install">Install ATLAS</a>
     </div>
   </div>
@@ -39,6 +39,7 @@
 <main id="main">
 
 <section class="hero" id="top" data-enter>
+  <div class="hero-bg" aria-hidden="true"><img src="assets/photo-room.jpg" width="1600" height="1055" alt="" fetchpriority="high" decoding="async"></div>
   <div class="wrap">
     <div class="copy">
       <h1>Six agents run the project. <em>You build the software.</em></h1>
@@ -75,6 +76,31 @@
   </div>
 </section>
 
+<section id="meeting" class="meeting">
+  <div class="wrap">
+    <div class="stage">
+      <figure class="photo"><img src="assets/photo-meeting.jpg" width="1360" height="1020" loading="lazy" decoding="async" alt="Two people at a wooden table: one writes in a small notebook while the other talks, with a coffee, a glass of water, two phones and a tablet between them."></figure>
+      <div class="quote glass">
+        <p>“We lose about one order in ten.”</p>
+        <span class="mono">Owner · meeting 1 · 00:14:32</span>
+      </div>
+      <div class="trace glass">
+        <span class="mono">REQ-007 [M01@00:14:32]</span>
+        <strong>Take a deposit when the order is placed</strong>
+      </div>
+    </div>
+    <div class="text">
+      <h2>It starts with a conversation.</h2>
+      <p class="sub">Record the client meeting, or bring your notes. Alice reads them and writes each requirement with the moment it was said, so every line of the scope can be traced to its source.</p>
+      <dl>
+        <div><dt>Goes in</dt><dd>Transcripts, meeting notes, client documents</dd></div>
+        <div><dt>Comes out</dt><dd>PRD, proposal, questions for the client</dd></div>
+        <div><dt>Sample here</dt><dd>Bakery Orders, for the owner of a three-shop bakery</dd></div>
+      </dl>
+    </div>
+  </div>
+</section>
+
 <section id="run">
   <div class="wrap">
     <div class="rule">
@@ -93,11 +119,11 @@
     </div>
 
     <div class="live">
-      <div class="say glass" aria-live="polite">
+      <div class="say glass" id="stage-panel" aria-live="off">
         <span class="cmd" id="cmd">/atlas new Bakery Orders</span>
         <p id="say">Atlas creates the project and asks for the client, the size and the code repository.</p>
         <div class="ctl">
-          <button type="button" id="play" aria-pressed="true">Pause</button>
+          <button type="button" id="play">Pause</button>
           <button type="button" id="step">Show next step</button>
           <span class="count" id="count">1 / 9</span>
         </div>
@@ -156,6 +182,10 @@
     <div class="rule">
       <h2>Progress comes from git, not from memory.</h2>
       <p class="sub">Teammates need nothing installed. Atlas reads what they push and asks you only about what it cannot match.</p>
+    </div>
+    <div class="band">
+      <figure class="photo"><img src="assets/photo-team.jpg" width="1600" height="600" loading="lazy" decoding="async" alt="Two colleagues at a wooden table with open laptops; one marks up a page of hand-drawn screen sketches with a pencil."></figure>
+      <div class="note glass"><span class="mono">pull request #12 merged → WP-07 done</span></div>
     </div>
     <div class="trio">
       <article class="glass">
@@ -254,6 +284,7 @@ atlas setup --mode github</code></pre>
       <h2>A project in six steps.</h2>
       <p class="sub">Each step is a chat command or a plain request in Claude Code or Codex. <code>/atlas go</code> always does whatever comes next.</p>
     </div>
+    <div class="walk">
     <ol class="steps">
       <li><h3>Create the project</h3><p><code>/atlas new Bakery Orders</code> creates <code>PRJ-0001</code>. Already have a PRD or a half-built codebase? Add <code>--prd file.md</code> or <code>--start build</code> and ATLAS picks up from there.</p></li>
       <li><h3>Discover with Alice</h3><p>Add the client's transcripts and documents with <code>atlas intake ./client-files</code>, then run <code>/alice</code>. You get the internal PRD, a plain-language proposal as a PDF, and the questions only the client can answer.</p></li>
@@ -262,6 +293,11 @@ atlas setup --mode github</code></pre>
       <li><h3>Check in</h3><p><code>/atlas</code> in chat, or <code>atlas status</code> in a terminal. You see progress per phase, failing CI, stale pull requests, documents that have fallen behind, and the next step.</p></li>
       <li><h3>Test, release, hand over</h3><p>Sentinel writes the tests and the client's acceptance script. After the client signs it, <code>atlas release P1</code> closes the phase. After the last phase, <code>/alice handover</code> writes the handover pack.</p></li>
     </ol>
+      <div class="shot">
+        <figure class="photo"><img src="assets/photo-build.jpg" width="880" height="1100" loading="lazy" decoding="async" alt="Hands typing on a laptop keyboard at a desk, lit by a window behind."></figure>
+        <div class="push glass"><span class="cmd">git push</span><span class="mono">WP-07-checkout → in progress</span></div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -296,6 +332,7 @@ atlas setup --mode github</code></pre>
     </div>
     <div class="list">
       <details><summary>Where does client information go?</summary><p>Into the project's private storage: a private GitHub repository or your own folder. It never enters the code repository that teammates clone. Only the proposal, questions, acceptance script, updates and handover pack are exported, as PDFs.</p></details>
+      <details><summary>What happens when the scope changes after the client signs?</summary><p>The signed requirements become the baseline. If a later meeting or edit changes one, Atlas reports it with the old wording, the new wording and the meeting it came from. You approve it as a change request or put the scope back; nothing changes silently.</p></details>
       <details><summary>What if a teammate pushes code without the plugin?</summary><p>That is the normal case. Atlas reads their commits, branches, pull requests and CI the next time you check in, and asks you about anything it cannot match.</p></details>
       <details><summary>How much does a run cost in tokens?</summary><p>Each agent starts from a brief of about thirty lines and reads only the rows it needs from earlier documents. Routine status checks run in the terminal and use none.</p></details>
       <details><summary>Does it search the web with client details?</summary><p>No. Research queries are generic: industry, country, topic. Names, figures and anything confidential stay on your machine.</p></details>
@@ -311,6 +348,7 @@ atlas setup --mode github</code></pre>
   <div class="wrap">
     <p>ATLAS is open source under the MIT licence. It works with Claude Code and OpenAI Codex.</p>
     <p><a href="https://github.com/jjibrah/atlas-plugin">github.com/jjibrah/atlas-plugin</a></p>
+    <p>Photographs: Breather, Alejandro Escamilla, Helloquence, Thomas Lefebvre (Unsplash via Wikimedia Commons, CC0).</p>
   </div>
 </footer>
 

@@ -1,6 +1,6 @@
 # Change requests
 
-The client changes scope after sign-off.
+The client changes scope after sign-off. A change that is already in the PRD (status says the PRD no longer matches what was signed) starts in `references/leads-scope.md`: `atlas scope --cr` opens the change request with its rows attached; continue here at step 4.
 
 1. `atlas cr open "<what changes, citing FR/REQ IDs if known>" --by "<who asked>"` → `CR-##`.
 2. Find what it touches (ask the user if unclear), then `atlas impact <FR-…> [REQ-…] --cr CR-##`. It lists every REQ, acceptance criterion, work package and test downstream.

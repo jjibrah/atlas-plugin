@@ -7,6 +7,7 @@ The brief lists an approved change request ("Change requests: CR-02 (approved): 
    - A dropped requirement keeps its row and ID, with status `rejected` or `out of scope` and the reason.
    - A new requirement gets a new ID (`alice.py next P FR`) citing the decision.
    - Add a decision `D-##` describing the change and citing `CR-02`, and a changelog row "Triggered by CR-02".
+   - A change that came out of a meeting (opened with `atlas scope --cr`) already has its rows updated: add only the decision and the changelog row.
 3. `atlas decision "D-09: <the change> (CR-02)" --by "<who asked>" --actor alice`
 4. **Proposal.** `alice.py changed P` lists the changed rows and the proposal sections they touch. If the scope or the phases the client reads have changed, rewrite only those sections and raise the proposal's version. If not: `alice.py changed P --mark`.
 5. `alice.py check P` and fix every FAIL. Then `atlas finish alice --stage none`.

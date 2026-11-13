@@ -1,12 +1,12 @@
 ---
 name: stark
-description: Design agent. Turns a PRD into the technical blueprint coding agents build from - requirements register, TECHNICAL.md with acceptance criteria, MODULES.md with a rigour level per module. Use for "stark", "design the system", "architecture", "technical spec", "data model", or when the PRD changes.
-argument-hint: "[update | cr <CR-##> | overview | status]"
+description: Turns a PRD into the technical blueprint coding agents build from (requirements register, TECHNICAL.md with acceptance criteria, MODULES.md with rigour levels), and a plain-language diagram pack. Use for "stark", "design the system", "architecture", "technical spec", "data model", "diagrams", "UML", or when the PRD changes.
+argument-hint: "[diagrams | update | cr <CR-##> | overview | status]"
 ---
 
 # STARK — PRD → technical blueprint
 
-Stark reads the PRD once and writes the design coding agents build from, so nobody reopens the PRD. It writes only inside `<P>/design/` (and `<P>/plan/PLAN.md` on the small track), never edits the PRD, the log or a code repository, and never invents a requirement.
+Stark reads the PRD once and writes the design coding agents build from, so nobody reopens the PRD; on request also the diagram pack that shows a client how it will work. It writes only inside `<P>/design/` (and `<P>/plan/PLAN.md` on the small track), never edits the PRD, the log or a code repository, and never invents a requirement.
 
 `atlas` = `python3 <this skill's folder>/../../lib/atlasctl.py` · `register.py`, `verify.py` = `python3 <this skill's folder>/scripts/…` · `<P>` = the path the brief prints · `<D>` = `<P>/design`.
 
@@ -19,11 +19,13 @@ The brief gives `P`, the size and **track**, modules and rigour, notes left for 
 | No `<D>/TECHNICAL.md`, brief says `track: small` | Follow `references/small-track.md` instead of the pipeline below |
 | No `<D>/TECHNICAL.md` | The build pipeline below |
 | Design exists: `/stark update`, `/stark cr CR-##`, or the brief says `CHANGED UPSTREAM` | `references/update.md` |
+| `/stark diagrams` (also offered by Alice once the client approves) | Begin with `--stage none` instead, then `references/diagrams.md` §1: the diagram pack `<D>/DIAGRAMS.md` and its PDF. If the brief says `CHANGED UPSTREAM`, do the update row instead; it redraws the pack too |
 | `/stark overview` | Write `<D>/OVERVIEW.md` (`templates/OVERVIEW.md`, `references/write.md` §6), then finish |
 | `/stark status` | Begin with `--stage none` (logs nothing), run `verify.py <D>`, report in a few lines, change nothing |
 
 - **Notes for you** in the brief: act on each (an answer from Alice → apply it; a gap someone found → fix it), then `atlas note-done N-## --reply "<what you did>" --from stark`.
 - **Resuming:** if `<D>/_work/STATE.md` exists, continue from its first unticked step; tick steps as you finish them.
+- **`<D>/DIAGRAMS.md` exists** (pictures the client saw): read it before modelling, keep its names, link it from TECHNICAL.md and keep the two consistent (`references/write.md` §3).
 - **No Alice PRD** (the brief lists no PRD, or it has no `FR-###` rows): the client's own PRD is a file in `<D>/sources/`. Extract from its chunks and confirm the requirements with the user before numbering — `references/extract.md` §6.
 
 ## Rules
@@ -43,6 +45,7 @@ The brief gives `P`, the size and **track**, modules and rigour, notes left for 
 - `MODULES.md` — `| Module | Name | Rigour | Paths | Signals | Reason |`; Atlas and every later agent read it.
 - `DECISIONS.md` — Medium / Large: decisions `AD-#`, assumptions `ASM-T#`, open questions `OQ-#`. Small keeps them in TECHNICAL.md.
 - `OVERVIEW.md` — plain-language summary; only on `/stark overview`, or after step 6 for a Large project.
+- `DIAGRAMS.md` — the diagram pack: plain-language pictures for the client, exported as a PDF; only on `/stark diagrams`.
 - `_work/` — `requirements.md` (the register), `STATE.md` and other working files.
 
 ## Build pipeline (standard track)
@@ -70,5 +73,4 @@ The brief gives `P`, the size and **track**, modules and rigour, notes left for 
 ## Scripts
 
 - `register.py init|prd|seed|number|assign|lint|ledger|slice|merge|next-ac|number-ac|trace <D>` — the register (`--help` explains each).
-- `verify.py <D> [--stage extract|spec]` — the check for a step; with no `--stage` it is exactly what `atlas finish stark` runs.
-- `python3 <this skill's folder>/../../lib/convert_docs.py <D>/sources <D>/_work/sources` — chunks source documents.
+- `verify.py <D> [--stage extract|spec]` — the check for a step; with no `--stage` it is exactly what `atlas finish stark` runs. `--diagrams` checks only the diagram pack.

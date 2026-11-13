@@ -55,7 +55,7 @@ After installation, start a new Claude Code or Codex session so it loads the plu
 
 ## Set up (once per device)
 
-Open Claude Code or Codex and say **"set up atlas"**, or run the setup yourself. Choose where project records live:
+You can skip this step: `atlas start` (or asking Alice to write up a meeting) sets up a local projects folder at `~/AtlasProjects` by itself. To choose where project records live, open Claude Code or Codex and say **"set up atlas"**, or run the setup yourself:
 
 | Mode | Command | Best for |
 |---|---|---|
@@ -72,15 +72,17 @@ Setup also creates `~/.atlas/venv`, with PyMuPDF for reading PDFs. Run `python3 
 
 | Step | Say / run | What happens |
 |---|---|---|
-| 1 | `/atlas new Bakery Orders` | Atlas creates `PRJ-0001` and asks for the client, size, author and code repo. Existing PRD or codebase: add `--prd file.md` or `--start build` |
-| 2 | `atlas intake ./client-files`, then `/alice` | You get the PRD, the proposal and the client questions. Alice asks you about anything unclear and never guesses |
-| 3 | Client approves: *"record sign-off"* | The approved documents are snapshotted. The ready-for-design check passes by itself |
+| 1 | *"Write up this client meeting"* in a folder with the notes, or `atlas start "Sunrise Bakery" --files ./client-files` | With nothing set up, Alice asks one question (the client's name) and starts the project. Existing PRD or codebase: `atlas new … --prd file.md` or `--start build` |
+| 2 | `/alice` (more files later: `atlas intake ./more-files`) | You get the PRD, the proposal and the client questions. Alice talks in plain words, asks only what changes the outcome, and never guesses |
+| 3 | *"The proposal was sent"*, then *"the client approved"* | `atlas lead sent` sets a follow-up reminder; the sign-off snapshots the approved documents and freezes what was agreed. Alice offers the diagram pack (`/stark diagrams`): how the system will work, as pictures, in a PDF |
 | 4 | `/atlas go` (twice) | Stark designs and proposes a rigour level per module; you confirm them with one command. Jarvis plans. On a Small project both happen in one run |
 | 5 | **You build** (alone, with a team, or with coding agents) | Branches named `WP-07-…` are matched exactly; nothing is required |
 | 6 | `/atlas` in chat, or `atlas status` in a terminal | Atlas reads new commits, pull requests and CI, moves the work packages, runs any pending check, and shows what needs you |
 | 7 | `/atlas go` → client UAT → `atlas release P1` | Sentinel writes the tests and the client's acceptance script; the phase is released. Repeat per phase |
 | 8 | `/alice report`, `/alice handover` | Client updates and the handover pack, as PDFs in `~/Desktop/<PRJ>-<name>-for-client/` |
 
+- **Every client in one list.** `atlas pipeline` shows each client and project, where it is, how long it has waited and what needs you. `atlas lead new "<client>"` tracks one you are still talking to.
+- **A later meeting changes something that was agreed?** Status says so. `atlas scope` shows the wording before and after and the meeting moment it came from; you accept it as a change request or keep the agreed scope.
 - **Checks (G1–G5) run by themselves** when an agent finishes and on every status. You see only what is still open. `/spartan` explains a failing check, records a waiver, or runs a security review.
 - **In Codex,** mention skills with `$atlas`, `$alice`, and so on, or ask in plain words.
 - **In a terminal,** `atlas status` uses no tokens. Setup installs the `atlas` command in `~/.local/bin`.
@@ -88,6 +90,8 @@ Setup also creates `~/.atlas/venv`, with PyMuPDF for reading PDFs. Run `python3 
 ## What makes it different
 
 - **Derived, not declared.** Progress comes from commits, pull requests and CI. A work package is marked done when its branch or pull request is merged; you can override it. Collaborators need nothing installed.
+- **On record and in sync.** Every requirement points at the meeting moment or document it came from. Once the client signs, the agreed requirements are frozen; any later difference is reported until someone decides, so scope never changes silently.
+- **Usable by non-engineers.** Alice starts from a client's name and a folder of notes, and talks about "what was agreed", not IDs.
 - **Asks instead of guessing.** When the evidence is ambiguous, Atlas asks you once and remembers the answer (`atlas learn`).
 - **Agents talk to each other.** A question for the client goes from Stark to Alice as a note, not through you. Status tells you when the plan has fallen behind the design, or the design behind the PRD.
 - **Cheap to run.** Each agent starts from a 30-line brief and reads only the rows it needs (`atlas pack`). Routine checks run in the terminal.
@@ -103,7 +107,7 @@ Setup also creates `~/.atlas/venv`, with PyMuPDF for reading PDFs. Run `python3 
 .codex-plugin/    Codex plugin manifest
 .agents/plugins/  Codex marketplace
 skills/           atlas · alice · stark · jarvis · sentinel · spartan
-lib/              shared scripts: atlasctl (core), flow (begin/finish/pack/notes), gates, convert_docs, pdf_export
+lib/              shared scripts: atlasctl (core), flow (begin/finish/pack/notes), intel (start, leads, scope watch), gates, convert_docs, pdf_export
 CONTRACT.md       the run interface, folders, IDs and events every agent follows
 CHANGELOG.md
 pipeline.md · rigour.md · gates.md

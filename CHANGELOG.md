@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.2.0
+
+On record and in sync: what the client asked for is written down from the first conversation, and the project is told whenever it drifts from what was agreed. Existing projects keep working; no migration is needed.
+
+**A front door**
+- `atlas start "<client or project>" [--files <folder>]` goes from nothing to a project in one command. On a new device it sets up a projects folder at `~/AtlasProjects` by itself; the size starts as Small.
+- `atlas set size|client|author|name <value>` corrects a detail later.
+- Alice starts by herself: with no project she asks one question, the client's name, and carries on.
+
+**Leads and the pipeline**
+- `atlas lead new "<client>"`, `lead note`, `lead sent "Proposal v1.0" --followup +5d`, `lead followup`, `lead won`, `lead lost --reason`.
+- `atlas pipeline` lists every client and project: where it is, days waiting, what needs you. A proposal with no reply by its follow-up date is on the attention list.
+
+**Scope watch**
+- `atlas signoff` and `atlas lead sent` freeze the PRD's requirement and rule rows as the baseline: what was agreed.
+- `atlas status` reports when the PRD no longer matches it. `atlas scope` shows what was added, changed or removed, with the wording before and after, the meeting moment it came from and what it touches downstream.
+- Someone decides: `atlas scope --cr` opens a change request; `atlas cr approved CR-##` moves the baseline; `atlas cr rejected CR-## --note …` leaves Alice a note to put the PRD back; `atlas scope --baseline "<why>"` accepts the PRD as it is.
+- After a new meeting Alice still updates the PRD, then says in plain words what differs from what was agreed, quotes the moment the client said it and asks you to decide. Agreed scope never changes silently.
+
+**Diagram pack**
+- `/stark diagrams` writes `design/DIAGRAMS.md`: who uses the system and for what, the main workflows, who talks to whom, the information it keeps, the life of the main record and the parts of the system. Plain labels, one sentence above each picture saying what it shows, three or four pictures for a small project.
+- `verify.py <design> --diagrams` checks it; `atlas export design/DIAGRAMS.md` makes the PDF with the diagrams drawn.
+- Alice offers it once the client approves. The full design builds on the pack and keeps the two consistent.
+
+**Alice speaks plain words**
+- In chat she says "the requirements document", "the questions for the client", "the check before design"; no IDs or command names. The documents keep their IDs.
+- Fewer questions, only those that change the outcome, each with a suggested answer.
+- She proposes the project size in plain words, with the reason, and sets it.
+
+**Guide**
+- The guide gained photographs.
+
 ## 1.1.0
 
 Easier to run and cheaper in tokens. Existing projects keep working; no migration is needed.

@@ -23,7 +23,7 @@ WRITES = {"alice": "discovery/ and reports/", "stark": "design/", "jarvis": "pla
           "spartan": "reports/ (security reviews)", "atlas": "reports/"}
 DOCS = {"alice": [("PRD", "discovery/PRD.md"), ("PROPOSAL", "discovery/PROPOSAL.md"),
                   ("QUESTIONS", "discovery/QUESTIONS.md")],
-        "stark": [("TECHNICAL", "design/TECHNICAL.md")],
+        "stark": [("TECHNICAL", "design/TECHNICAL.md"), ("DIAGRAMS", "design/DIAGRAMS.md")],
         "jarvis": [("PLAN", "plan/PLAN.md")],
         "sentinel": [("TEST-PLAN", "test/TEST-PLAN.md")]}
 UPSTREAM = {"stark": ["prd"], "jarvis": ["design"], "sentinel": ["design", "plan"]}
@@ -300,7 +300,7 @@ def cmd_begin(a: argparse.Namespace) -> None:
     repos = p.repo_paths()
     if repos:
         L.append("Code (read-only): " + " · ".join("%s=%s" % (k, v) for k, v in repos.items()))
-    if agent == "stark" and s["track"] == "small":
+    if agent == "stark" and s["track"] == "small" and stage:
         L.append("Small track: write the plan (P/plan/PLAN.md) in this same run — see references/small-track.md.")
     adopted = [f.name for f in (p.path / "design" / "sources").glob("*") if f.is_file() and f.name != ".gitkeep"] \
         if (p.path / "design" / "sources").exists() else []
@@ -310,8 +310,8 @@ def cmd_begin(a: argparse.Namespace) -> None:
         "a question only the client can answer goes to Alice (`atlas note --to alice \"…\" --from %s`)" % agent
     L += ["Rules: never guess — ask the user in one batch; %s; IDs are permanent; no secrets in files; never put "
           "client details in a web search." % client_q,
-          "When done: atlas finish %s%s   (runs your check, logs the run, runs the gate, saves)" % (
-              agent, (" --phase " + phase) if phase else "")]
+          "When done: atlas finish %s%s%s   (runs your check, logs the run, runs the gate, saves)" % (
+              agent, (" --stage " + a.stage) if a.stage else "", (" --phase " + phase) if phase else "")]
     A.git_commit_push(p.path, "%s begins" % agent, push=False)
     print("\n".join(L))
 
@@ -329,6 +329,8 @@ def _checks(p: A.Project, agent: str, stage: str, phase: str, small_plan: bool) 
             return [[py, str(sk / "alice/scripts/alice.py"), "check", str(p.path)]]
         return []
     if agent == "stark":
+        if not stage and not (p.path / "design" / "TECHNICAL.md").exists():
+            return []                                   # diagram pack before the design exists
         c = [[py, str(sk / "stark/scripts/verify.py"), str(p.path / "design")]]
         if small_plan:
             c.append([py, str(sk / "jarvis/scripts/verify.py"), str(p.path / "plan")])
@@ -399,8 +401,8 @@ def cmd_finish(a: argparse.Namespace) -> None:
         if v and last.get(name) != v:
             A.append_event(p, "doc.version", agent, "%s %s" % (name, v), refs=["%s@%s" % (name, v)])
     # 3. what this run was built on
-    if agent in UPSTREAM:
-        stamp(p, agent)
+    if agent in UPSTREAM and (stage or not (p.path / OUTPUT[agent]).exists()):
+        stamp(p, agent)          # a side run (diagram pack, a note) must not hide that the design is behind
     if small_plan:
         stamp(p, "jarvis")
     # 4. stage finished

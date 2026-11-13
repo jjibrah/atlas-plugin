@@ -51,7 +51,9 @@ th { background: #eef2f6; }
 td:empty { min-width: 110px; height: 26px; }
 code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9pt; background: #f2f4f7; padding: 0 3px; }
 pre { background: #f6f8fa; padding: 8px; font-size: 8.5pt; white-space: pre-wrap; }
-pre.mermaid { background: none; text-align: center; }
+pre.mermaid { background: none; text-align: center; break-inside: avoid; }
+h1, h2, h3, h4 { break-after: avoid; }
+p:has(+ pre.mermaid) { break-after: avoid; }
 blockquote { border-left: 3px solid #2b5c8a; margin: 8px 0; padding: 2px 10px; color: #3d4752; background: #f5f8fb; }
 hr { border: none; border-top: 1px solid #d9dee5; margin: 16px 0; }
 ul, ol { margin: 4px 0 8px 22px; padding: 0; }

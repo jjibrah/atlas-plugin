@@ -11,9 +11,10 @@
   function setPaused(p) {
     paused = p;
     root.classList.toggle("paused", p);
-    if (motionBtn) { motionBtn.textContent = p ? "Play motion" : "Pause motion"; motionBtn.setAttribute("aria-pressed", String(p)); }
+    /* the label names the action, so it carries the state by itself (no aria-pressed on top of it) */
+    if (motionBtn) { var label = motionBtn.querySelector(".t") || motionBtn; label.textContent = p ? "Play motion" : "Pause motion"; }
     var play = $("play");
-    if (play) { play.textContent = p ? "Play" : "Pause"; play.setAttribute("aria-pressed", String(!p)); }
+    if (play) play.textContent = p ? "Play" : "Pause";
   }
   if (motionBtn) motionBtn.addEventListener("click", function () { setPaused(!paused); });
 
@@ -86,18 +87,22 @@
       phase: "all phases released", next: "Project complete.", ev: ["alice", "stage.finished", "Handover pack written"] }
   ];
   var track = $("track"), cmdEl = $("cmd"), sayEl = $("say"), statusEl = $("status"), logEl = $("log"), countEl = $("count");
-  var fi = 0, seq = 1, timer = 0;
+  var fi = 0, seq = 1, timer = 0, held = false;
+  var panel = $("stage-panel");
   var hash = function () { return Math.floor(Math.random() * 65535).toString(16).padStart(4, "0"); };
   function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
-  function render(i, quiet) {
+  function render(i, quiet, byUser) {
     var f = frames[i];
     if (!track) return;
+    /* announce a step only when the reader asked for it; the automatic run stays silent */
+    if (panel) panel.setAttribute("aria-live", byUser ? "polite" : "off");
     var stations = track.querySelectorAll(".station");
     stations.forEach(function (el, n) {
       el.classList.toggle("on", n === f.s);
       el.classList.toggle("past", n < f.s);
       el.setAttribute("aria-selected", String(n === f.s));
+      el.tabIndex = n === f.s ? 0 : -1;
       var gate = el.querySelector(".gate");
       if (gate) gate.classList.toggle("ok", n < f.g);
     });
@@ -121,8 +126,12 @@
       while (logEl.children.length > 4) logEl.removeChild(logEl.firstChild);
     }
   }
-  function advance() { fi = (fi + 1) % frames.length; if (fi === 0) { seq = 1; logEl.innerHTML = ""; } render(fi); }
-  function schedule() { clearInterval(timer); timer = setInterval(function () { if (!paused && inView) advance(); }, 3600); }
+  function advance(byUser) { fi = (fi + 1) % frames.length; if (fi === 0) { seq = 1; logEl.innerHTML = ""; } render(fi, false, byUser); }
+  function schedule() { clearInterval(timer); timer = setInterval(function () { if (!paused && inView && !held) advance(false); }, 3600); }
+  function goStage(s, byUser) {
+    for (var n = frames.length - 1; n >= 0; n--) { if (frames[n].s === s) { fi = n; break; } }
+    render(fi, false, byUser); schedule();
+  }
 
   var inView = false;
   if (track) {
@@ -131,15 +140,25 @@
       new IntersectionObserver(function (es) { inView = es[0].isIntersecting; }, { threshold: 0.25 }).observe(track.parentNode);
     } else { inView = true; }
     schedule();
-    $("step").addEventListener("click", function () { advance(); schedule(); });
+    $("step").addEventListener("click", function () { advance(true); schedule(); });
     $("play").addEventListener("click", function () { setPaused(!paused); });
-    track.querySelectorAll(".station").forEach(function (el) {
-      el.addEventListener("click", function () {
-        var s = Number(el.getAttribute("data-s"));
-        for (var n = frames.length - 1; n >= 0; n--) { if (frames[n].s === s) { fi = n; break; } }
-        render(fi); schedule();
+    var stationEls = Array.prototype.slice.call(track.querySelectorAll(".station"));
+    stationEls.forEach(function (el, n) {
+      if (panel) el.setAttribute("aria-controls", panel.id);
+      el.addEventListener("click", function () { goStage(Number(el.getAttribute("data-s")), true); });
+      /* arrow keys, Home and End move between stages, as in any tab list */
+      el.addEventListener("keydown", function (e) {
+        var to = e.key === "ArrowRight" || e.key === "ArrowDown" ? (n + 1) % stationEls.length
+          : e.key === "ArrowLeft" || e.key === "ArrowUp" ? (n - 1 + stationEls.length) % stationEls.length
+          : e.key === "Home" ? 0 : e.key === "End" ? stationEls.length - 1 : -1;
+        if (to < 0) return;
+        e.preventDefault(); goStage(to, true); stationEls[to].focus();
       });
     });
+    /* the run waits while the keyboard is inside it, so focus never moves under the reader */
+    var runBox = track.parentNode;
+    runBox.addEventListener("focusin", function () { held = true; });
+    runBox.addEventListener("focusout", function (e) { if (!runBox.contains(e.relatedTarget)) held = false; });
   }
   setPaused(paused);
 
@@ -156,21 +175,29 @@
     tabs.forEach(function (tab, n) {
       tab.addEventListener("click", function () { pick(tab); });
       tab.addEventListener("keydown", function (e) {
-        var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-        if (!d) return;
-        var t = tabs[(n + d + tabs.length) % tabs.length]; pick(t); t.focus(); e.preventDefault();
+        var to = e.key === "ArrowRight" ? (n + 1) % tabs.length : e.key === "ArrowLeft" ? (n - 1 + tabs.length) % tabs.length
+          : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+        if (to < 0) return;
+        var t = tabs[to]; pick(t); t.focus(); e.preventDefault();
       });
     });
   });
 
   /* ── copy buttons on code blocks ── */
+  var status = document.createElement("span");
+  status.className = "vh"; status.setAttribute("role", "status");
+  document.body.appendChild(status);
   document.querySelectorAll("pre.code").forEach(function (pre) {
     var b = document.createElement("button");
     b.className = "copy-btn"; b.type = "button"; b.textContent = "Copy";
     b.setAttribute("aria-label", "Copy the commands");
     b.addEventListener("click", function () {
       var text = pre.querySelector("code").innerText.replace(/\s+#.*$/gm, "").replace(/\\\n\s*/g, "");
-      var done = function (ok) { b.textContent = ok ? "Copied" : "Select and copy"; setTimeout(function () { b.textContent = "Copy"; }, 1600); };
+      var done = function (ok) {
+        b.textContent = ok ? "Copied" : "Select and copy";
+        status.textContent = ok ? "Commands copied" : "Copying failed. Select the commands and copy them.";
+        setTimeout(function () { b.textContent = "Copy"; status.textContent = ""; }, 1600);
+      };
       if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
       else done(false);
     });

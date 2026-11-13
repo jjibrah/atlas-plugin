@@ -2,6 +2,7 @@
 """Verify a STARK design folder (<P>/design). Exit code 1 if anything FAILs (WARNs do not fail).
 
 Usage: verify.py <design_dir> [--stage extract|spec|all]
+       verify.py <design_dir> --diagrams
 
   extract  register well-formed; every in-scope PRD FR cited by a REQ (adopted PRD without FR rows: every REQ cites
            its source chunk and every chunk is accounted for); extra design sources accounted for
@@ -11,6 +12,12 @@ Usage: verify.py <design_dir> [--stage extract|spec|all]
            within size budgets
   all      (default) spec + traceability. OVERVIEW.md is optional (written on request): it is checked for plain
            language when present and required only when the project's size in atlas.json is Large.
+
+  --diagrams  only the diagram pack DIAGRAMS.md (it can exist before the design does): a `| Version | v1.0 — … |`
+           header row; nothing left from the template; balanced code fences; at least 3 Mermaid diagrams, each
+           starting with a known diagram type and not empty; no internal IDs inside a diagram. Warns about syntax
+           that often breaks rendering and about a picture with no "What this picture shows" sentence above it.
+           The full check runs the same checks whenever DIAGRAMS.md exists.
 
 `atlas finish stark` runs exactly `verify.py <P>/design`. These checks mirror what gate G2 reads, so a PASS here
 means G2 can parse the design.
@@ -26,7 +33,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import register as reg  # noqa: E402
 
-BUDGETS_KB = {"TECHNICAL.md": 40, "OVERVIEW.md": 30, "DECISIONS.md": 40, "MODULES.md": 15}
+BUDGETS_KB = {"TECHNICAL.md": 40, "OVERVIEW.md": 30, "DECISIONS.md": 40, "MODULES.md": 15, "DIAGRAMS.md": 30}
 SINGLE_FILE_BUDGET_KB = 60   # TECHNICAL.md when there are no module files
 MODULE_BUDGET_KB = 35
 MAX_CELL = 600
@@ -35,6 +42,13 @@ LATER_OUTPUTS = ("PLAN.md", "AUDIT.md")  # Jarvis writes these after the design
 MODULES_HEADER = ["module", "name", "rigour", "paths", "signals", "reason"]
 LEVELS = ("Light", "Standard", "Critical")
 VERSION_RE = re.compile(r"\|\s*\**Version\**\s*\|\s*\**\s*(v\d+(?:\.\d+)*)", flags=re.I)  # what `atlas finish` reads
+DIAGRAM_TYPES = ("flowchart", "graph", "sequenceDiagram", "classDiagram", "erDiagram", "stateDiagram-v2", "stateDiagram")
+MIN_DIAGRAMS = 3
+PACK_NODES = 25              # a picture for a client should fit one page
+SHOWS_RE = re.compile(r"what this (picture|diagram) shows", flags=re.I)
+# Internal identifiers that never belong in a picture for the client.
+PACK_ID_RE = re.compile(r"\b(?:FR-\d{2,}|BR-\d+|REQ-\d+|AC-\d+|PP-\d+|WF-\d+|WP-\d+|TC-\d+|CR-\d+|OQ-\d+|AD-\d+|RS-\d+"
+                        r"|ASM-T?\d+|(?<![A-Za-z])Q-\d{3}|(?<![A-Za-z])[UDP]-\d{2,})\b")
 
 
 def project_size(root):
@@ -105,6 +119,78 @@ def check_docs(root, docs, fails, warns):
         if longest > MAX_LINE or fat:
             warns.append("%s has %d table cell(s) over %d characters (longest line %d) — move detail into a note below the table."
                          % (name, fat, MAX_CELL, longest))
+
+
+# ------------------------------------------------------------------ the diagram pack
+def check_diagrams(root, text, fails, warns):
+    """DIAGRAMS.md: pictures for the client. The generic checks (placeholders, fences, empty diagrams, links) are in
+    check_docs; this adds what makes the file a usable pack."""
+    name = "DIAGRAMS.md"
+    if not VERSION_RE.search(text[:3000]):
+        fails.append("%s has no `| Version | v1.0 — YYYY-MM-DD |` row in its header table." % name)
+    if len(re.findall(r"^\s*```", text, flags=re.M)) % 2:
+        return                                   # check_docs reports it; the blocks cannot be read reliably
+    blocks = list(re.finditer(r"^[ \t]*```mermaid[ \t]*\n(.*?)^[ \t]*```[ \t]*$", text, flags=re.S | re.M))
+    other = [m for m in re.findall(r"^[ \t]*```(\w+)", text, flags=re.M) if m != "mermaid"]
+    if other:
+        warns.append("%s has code blocks that are not diagrams (%s) — the pack is pictures and plain words."
+                     % (name, ", ".join(sorted(set(other)))))
+    if len(blocks) < MIN_DIAGRAMS:
+        fails.append("%s has %d Mermaid diagram(s); a diagram pack needs at least %d (```mermaid blocks)."
+                     % (name, len(blocks), MIN_DIAGRAMS))
+    prev_end = 0
+    for i, m in enumerate(blocks, 1):
+        body = [ln.strip() for ln in m.group(1).splitlines() if ln.strip() and not ln.strip().startswith("%%")]
+        before = re.sub(r"<!--.*?-->", "", text[prev_end:m.start()], flags=re.S)
+        prev_end = m.end()
+        if not SHOWS_RE.search(before):
+            warns.append('%s: diagram #%d has no "What this picture shows: …" sentence above it.' % (name, i))
+        if not body:
+            continue                             # check_docs: empty diagram
+        kind = body[0].split()[0].rstrip(":;")
+        if kind not in DIAGRAM_TYPES:
+            fails.append("%s: diagram #%d starts with '%s' — its first line must be a diagram type (%s)."
+                         % (name, i, body[0][:40], ", ".join(DIAGRAM_TYPES[:-1])))
+            continue
+        blk = "\n".join(body)
+        ids = sorted(set(PACK_ID_RE.findall(blk)))
+        if ids:
+            fails.append("%s: diagram #%d shows internal IDs (%s) — label things in plain words."
+                         % (name, i, ", ".join(ids[:6])))
+        if kind == "stateDiagram":
+            warns.append("%s: diagram #%d uses `stateDiagram` — write `stateDiagram-v2`." % (name, i))
+        if kind.startswith("stateDiagram"):
+            for ln in body[1:]:
+                if "-->" in ln and ln.count(":") > 1:
+                    warns.append("%s: diagram #%d has a colon inside a transition label (`%s`)." % (name, i, ln[:60]))
+                    break
+        if kind == "sequenceDiagram" and any(";" in ln.split(":", 1)[1] for ln in body[1:] if ":" in ln):
+            warns.append("%s: diagram #%d has a semicolon in a message — it ends the statement." % (name, i))
+        if kind in ("flowchart", "graph"):
+            nodes = set(re.findall(r"(?:^|[\s>|])([A-Za-z_]\w*)\s*(?:\[|\(|\{)", blk))
+            if len(nodes) > PACK_NODES:
+                warns.append("%s: diagram #%d has %d boxes — split it so each picture fits a page." % (name, i, len(nodes)))
+    prose = re.sub(r"<!--.*?-->", "", re.sub(r"```.*?```", "", text, flags=re.S), flags=re.S)
+    ids = sorted(set(PACK_ID_RE.findall(prose)))
+    if ids:
+        warns.append("%s mentions internal IDs in its text (%s) — the client reads this; keep them in an HTML comment."
+                     % (name, ", ".join(ids[:6])))
+    if project_size(root) == "Small" and len(blocks) > 5:
+        warns.append("%s has %d diagrams for a Small project — 3 or 4 are usually enough." % (name, len(blocks)))
+
+
+def verify_diagrams(root):
+    path = os.path.join(root, "DIAGRAMS.md")
+    fails, warns = [], []
+    if not os.path.exists(path):
+        fails.append("Missing DIAGRAMS.md in %s — write it from templates/DIAGRAMS.md." % root)
+        return reg.report(fails, warns)
+    text = read(path)
+    check_diagrams(root, text, fails, warns)
+    check_docs(root, {path: text}, fails, warns)
+    print("DIAGRAMS.md %s: %d diagram(s)" % ((VERSION_RE.search(text[:3000]) or [None, "(no version)"])[1],
+                                              len(mermaid_blocks(text))))
+    reg.report(fails, warns)
 
 
 # ------------------------------------------------------------------ spec checks
@@ -310,6 +396,8 @@ def main():
         print(__doc__)
         sys.exit(0 if args else 2)
     root = os.path.abspath(args[0])
+    if "--diagrams" in args:
+        return verify_diagrams(root)
     stage = args[args.index("--stage") + 1] if "--stage" in args else "all"
     if stage not in ("extract", "spec", "all"):
         sys.exit("Unknown stage: %s (extract | spec | all)" % stage)
@@ -334,7 +422,7 @@ def main():
         for p in sorted(glob.glob(os.path.join(root, "technical", "*.md"))):
             tech[p] = read(p)
         docs = dict(tech)
-        for n in ("DECISIONS.md", "OVERVIEW.md", "MODULES.md"):
+        for n in ("DECISIONS.md", "OVERVIEW.md", "MODULES.md", "DIAGRAMS.md"):
             p = os.path.join(root, n)
             if os.path.exists(p):
                 docs[p] = read(p)
@@ -364,6 +452,12 @@ def main():
                 warns.append("No _work/traceability.md — run register.py trace.")
         if overview is not None:
             check_overview(overview, fails, warns)
+        pack = docs.get(os.path.join(root, "DIAGRAMS.md"))
+        if pack is not None:                     # the pictures the client saw: same checks as `--diagrams`
+            check_diagrams(root, pack, fails, warns)
+            if core is not None and "DIAGRAMS.md" not in core:
+                warns.append("TECHNICAL.md does not link the diagram pack — add [DIAGRAMS.md](DIAGRAMS.md) to its "
+                             "introduction and keep the two consistent (references/write.md §3).")
         check_docs(root, docs, fails, warns)
 
     reg.report(fails, warns)

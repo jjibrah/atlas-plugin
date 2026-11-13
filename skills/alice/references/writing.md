@@ -27,6 +27,15 @@ Use the template `alice.py init` named: `PRD-small.md` for a Small project, `PRD
 7. **Mermaid diagrams** only for the workflows that matter and the solution overview. Node IDs without spaces or hyphens; quote labels that contain punctuation.
 8. **Every new version** gets a changelog row naming its trigger (a meeting, client answers, `CR-04`), and the header counts are brought up to date.
 
+## Clarifications
+
+Every unclear point you asked the user is a `U-##` row in *Clarifications from our team*:
+
+- **answered** → answer and date; cite `[U-##]` where used (it counts as client evidence);
+- **ask the client** → status `sent to client (Q-###)` and a row in QUESTIONS.md; what depends on it stays `to confirm`, citing the Q;
+- **suggestion accepted** → answered, plus an assumption `ASM-##` citing the U;
+- **could not ask** → `pending`; what depends on it stays `to confirm`, citing `[U-##]`.
+
 ## Applying client answers
 
 For each answered question (step 4 found them):
