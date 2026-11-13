@@ -1,87 +1,48 @@
 ---
 name: spartan
-description: Risk and security gatekeeper for every stage of a client project. Runs the scripted quality gates G1–G5 (define→design, design→plan, plan→build, build→test, test→release), explains each failure in plain words with the exact fix and the agent that fixes it, asks the user the yes/no checks no script can settle, and records the result — never passing a gate any other way. Also does read-only security reviews of changes touching Critical modules (required by G4) and provides threat-note prompts for design. Use when the user says "spartan", "/spartan", "run the gate", "gate G2", "check the gate", "can we move to design/plan/build", "are we ready to release", "is it safe to release", "is it safe to go live", "security review", "review the payment/auth code", "threat model", or "waive the gate".
-argument-hint: "G1|G2|G3|G4|G5 [--phase P#] | review [--phase P#] [--module M#]"
+description: Risk and security agent, on demand; gates run by themselves. Explains a gate's open items and routes each fix, records a gate waiver the user decides on, and does security reviews of Critical modules. Use for "spartan", "gate fails", "waive a gate", "security review".
+argument-hint: "[G1–G5 [--phase P#] | waive G# | review [--phase P#] [--module M#]]"
 ---
 
 # SPARTAN — gates and security
 
-Spartan decides whether the project may move to the next stage. A gate is passed in one of two ways only:
-- `atlasctl gate … --record` with a non-failing result;
-- an explicit, reasoned waiver from the user.
+Gates G1–G5 run by themselves in `atlas finish` and `atlas status`; one that passes is recorded automatically. Spartan is called when a gate's open items need explaining, for a waiver, or for a security review.
 
-Read `<plugin>/CONTRACT.md` once per session (binding), then `<plugin>/gates.md` and `<plugin>/rigour.md`. Paths: `<skill>` is this skill's folder, `<plugin>` = `<skill>/../..`, `<lib>` = `<plugin>/lib`. Write `atlasctl` for `python3 <lib>/atlasctl.py`. `<P>` = `atlasctl where`.
+`atlas` means `python3 <this skill's folder>/../../lib/atlasctl.py`; `spartan` means `python3 <this skill's folder>/scripts/spartan.py`.
 
-Code repositories are **read-only**. Spartan writes only `<P>/reports/security-review-*.md`. Everything else goes through `atlasctl`.
+- **Start:** `atlas begin spartan --stage none`. The brief gives the project folder `P`, modules with rigour, code repositories and notes for you; close each note you handle with `atlas note-done N-01 --reply "…"`.
+- **End:** `atlas finish spartan --stage none` saves and re-runs any pending gate.
+- Code repositories are read-only. Spartan writes only `P/reports/security-review-*.md`.
 
-## Gate mode — `/spartan G# [--phase P#]`
+## Gate — `/spartan G# [--phase P#]`
 
-G4 and G5 are per phase. If no phase is given, atlasctl uses the current one.
+1. `atlas gate G# [--phase P#]` prints only the open items (`--all` shows every check). G4 and G5 are per phase (default: the current one).
+2. For each `[FAIL]`, with `references/gate-fixes.md`: say in one plain sentence what is wrong (with the IDs), the exact fix and who does it. Then leave the fix for that agent:
+   `atlas note --to <alice|stark|jarvis|sentinel> "<the fix, with IDs>" --from spartan --refs <IDs>`
+   No note for what only the user can do (record a sign-off, confirm rigour, finish or defer work, rotate a secret): tell the user.
+3. For each `[ASK ]`: put the yes/no questions to the user in one batch, with context. Never answer for them. Then `atlas gate G# [--phase P#] --answer <key>=yes|no`.
+4. A gate with nothing open is recorded as passed by that same command.
+5. **Waive** only when the user explicitly decides to go on despite open items: `atlas gate G# [--phase P#] --waive "<their reason, in their words>"`. Never suggest waiving a blocking security finding, a secret in a repository or a missing client sign-off.
 
-1. Run `atlasctl gate G# [--phase P#]`.
-2. **Explain every FAIL.** Use `references/gate-fixes.md` for the wording. For each one:
-   - one plain sentence on what is wrong, with the IDs from the detail;
-   - the exact fix (a command, or a document and row);
-   - who fixes it.
+Report the verdict, each open item with its fix and owner, the questions, and the next step (`atlas status`).
 
-   Example: "FR-004 is not cited by any technical requirement → run `/stark` to add a REQ for it."
-3. **ASK checks** (`[ASK ]` lines, keys printed at the end): put every question to the user in one batch, as plain yes/no questions with the context. Never answer them yourself. Then re-run with `--answer key=yes|no` for each answer.
-4. **Decide:**
-   - **Everything passes:** re-run the same command with the same `--answer`s plus `--record`. The pass is logged.
-   - **Fails remain:** you may record the failure with `--record`, so the timeline shows it. Then hand the fixes to the right agents. Re-run the gate after they are done.
-   - **Waiver:** only if the user explicitly decides to skip despite the fails. Use `atlasctl gate G# [--phase P#] --waive "<their reason, in their words>"`. Never suggest waiving a Blocker, a secret in the repo, or a missing client sign-off.
-5. **Next step after a pass:**
+## Security review — `/spartan review [--phase P#] [--module M#]`
 
-   | Gate | Next |
-   |---|---|
-   | G1 | `/stark` |
-   | G2 | `/jarvis` |
-   | G3 | build the phase |
-   | G4 | `/sentinel P#` |
-   | G5 | confirm the deployment with the user → `atlasctl release P# --note "…"` |
+G4 needs one for every Critical module the phase touches.
 
-**Proportion.** For Light or Small projects, the gate run is short: report the result in a few lines and don't pad. For Critical work, be thorough: list every fail and include the risk in one line.
+1. `spartan changes [--phase P#] [--module M#]` prints per Critical module the commits since its last review, the changed lines and the `git diff` command. Above about 1,500 changed lines it splits the diff by sub-folder: review one part at a time and say so in the report. Paths `?` or no repository linked: ask the user (`atlas link-repo <name> <path>`).
+2. Intended behaviour: `atlas pack spartan --module M#` (requirements and acceptance criteria), not the whole design.
+3. Read the diff and the files it touches against `references/security-review.md`. Each finding has `path:line`, a severity (Blocker / High / Medium / Low) and a concrete fix. What may be intended is a question for the user, not a finding.
+4. Write `P/reports/security-review-<M#>-<YYYY-MM-DD>.md` from `templates/security-review.md`. Give a secret's location and kind, never its value.
+5. Blocker and High findings block. List them in your report and leave each with the user: `atlas note --to user "<M#: problem at path:line, fix>" --from spartan --refs M#`.
+6. Record the review only when nothing blocks, or the user accepts each blocking finding with a reason (written in the report's Decision section). Otherwise re-review after the fix.
+   `atlas event review.security --actor spartan --summary "M1 Payments reviewed for P1: 0 blocker, 1 medium" --refs M1 --data '{"phase":"P1","module":"M1","findings":1}'`
+   One event per module: G4 reads the module from `--refs` and the phase from `data.phase`.
 
-## Review mode — `/spartan review [--phase P#] [--module M#]`
+## Threat notes (for Stark)
 
-G4 requires a security review for every Critical module touched in the phase.
-
-1. `python3 <skill>/scripts/spartan.py changes [--phase P#] [--module M#]` prints, for each Critical module:
-   - its Paths;
-   - the linked repositories on this device;
-   - the last review;
-   - the commits and files touching those paths since then;
-   - the `git diff` command to read.
-
-   If Paths is `?` or no repository is linked, ask the user (or send them to `/stark` for the paths, or `atlasctl link-repo` for the repository). Don't guess.
-2. Read the diffs and the touched files, read-only: `git log`, `git diff`, `git show`, and the files themselves. Also read the module's spec in `<P>/design/` (threat notes, failure/rollback, audit) to know the intended behaviour.
-3. Check against `references/security-review.md`, in proportion to what the diff touches. Each finding needs:
-   - `path:line` evidence;
-   - a severity (Blocker / High / Medium / Low);
-   - a concrete fix.
-
-   If something might be intended, put it under "Questions for the user", not as a finding.
-4. Write `<P>/reports/security-review-<M#>-<YYYY-MM-DD>.md` from `templates/security-review.md`. Never paste secret values into it: give the location and the kind of secret only.
-5. Report the findings to the user.
-   - **No Blocker or High findings:** record the review.
-   - **Blocker or High findings:** record it only once they are fixed (re-review the fix), or once the user explicitly accepts each one with a reason. Put the reason in the report's Decision section.
-
-   To record:
-
-   ```
-   python3 <lib>/atlasctl.py event review.security --actor spartan --summary "M1 Payments reviewed for P1: 0 blocker, 1 medium" --refs M1 --data '{"phase":"P1","module":"M1","findings":1,"report":"reports/security-review-M1-2026-11-13.md"}'
-   ```
-
-   Use one event per module. `refs` must contain the module ID and `data.phase` the phase; G4 looks for both.
-6. Suggest re-running `/spartan G4 --phase P#`.
-
-## Threat notes (helper for Stark)
-
-`references/threat-notes.md` holds a STRIDE-lite prompt list scaled to rigour. Stark uses it when writing Critical module specs. G2's `crit_M#` check fails without it. When G2 fails on threat notes, point Stark to that file.
+`spartan threats <signal> [<signal> …]` prints the checklist questions for a module's signals (money, personal data, auth, integration, states, regulation, migration). Name it in the note to Stark when G2 reports a Critical module without threat notes.
 
 ## Rules
 
-- **Never guess.** If an answer is unclear, ask. Never answer an ASK check on the user's behalf.
-- **Never mark a gate passed by any other means:** not by editing files or logs, and not with `--force`.
-- **Read-only** on code repositories. No secrets in reports.
-- **Report briefly:** the verdict, the fails with their fixes and owners, the questions, and the next step.
+Never guess. A gate passes by its checks or the user's waiver, never by editing files or the log.

@@ -1,22 +1,15 @@
 # Test plan — {{Project name}}
 
-<!-- SENTINEL. One section per phase; later phases are appended below, never renumbered.
-     Columns are fixed (CONTRACT.md §3). Covers = AC ids, plus the REQ they belong to, e.g. "AC-003, REQ-002".
-     Level = the module's rigour. Type = unit | integration | e2e | manual | security | performance.
-     Status = todo | pass | fail (update with `sentinel.py set <P> TC-001=pass`). Get the next id with `sentinel.py next <P>`.
-     Depth (rigour.md): Light → smoke + UAT step · Standard → unit + integration on main paths ·
-     Critical → + edge, failure, permission, end-to-end, migration rehearsal. -->
+| Field | Value |
+|---|---|
+| Project | {{PRJ-id}} {{Project name}} |
+| Version | v1.0 — {{YYYY-MM-DD}} |
+| Last TC issued | TC-000 |
 
-How to record results: the team (or its coding agents) runs the tests; tell Sentinel "TC-004 pass, TC-007 fail: <why>".
+<!-- SENTINEL. `sentinel.py seed <P> --phase P#` creates this file and adds one `## P# — <phase name>` section per
+     phase; rows are never renumbered and a TC id is never reused (`sentinel.py next <P>` gives the next one).
+     Covers = the criterion and its requirement ("AC-003, REQ-002"). Level = the module's rigour.
+     Type = unit | integration | e2e | manual | security | performance. Status = todo | pass | fail.
+     Retire a test in place: Steps "Retired: <reason>", Covers "—". -->
 
-## {{P1}} — {{phase name}}
-
-Phase goal: {{exit criterion from PLAN.md}}
-
-| TC | Covers | Module | Level | Type | Steps / expectation | Status |
-|---|---|---|---|---|---|---|
-| TC-001 | AC-001, REQ-001 | M1 | Standard | unit | Given … when … → expect … | todo |
-
-### Notes for {{P1}}
-- Test data / accounts needed: {{…}}
-- Not testable as written (asked the user): {{none}}
+**For whoever writes the automated tests:** put the test's id in the test name — `test_TC_012_refund_is_capped`, `it("TC-012 refund is capped")` — and produce a JUnit-style XML report. Results are then read with `sentinel.py results <P> <report.xml>`. Manual tests are reported by hand ("TC-004 pass, TC-007 fail: total wrong").

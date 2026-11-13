@@ -3,14 +3,16 @@
 
 Usage: verify.py <plan_dir> [--stage plan|audit|all] [--repo <code_repository_root>]
 
-  plan   PLAN.md tables are in the format atlasctl reads; every live REQ is in a work package's REQs column;
-         dependencies exist and have no cycles; every phase has a goal; Critical-module work packages are small
-         and end in a review checkpoint; briefs name WP branches; links and placeholders are clean
+  plan   PLAN.md has its `| Version | v1.0 — YYYY-MM-DD |` header row and tables in the format Atlas reads; every
+         live REQ is in a work package's REQs column or in the `| REQ | Evidence |` table of requirements already
+         built; dependencies exist and have no cycles; every phase has a goal; Critical-module work packages are
+         XS/S/M and end in a review checkpoint; briefs name WP branches; links and placeholders are clean
   audit  every REQ has an audit row in AUDIT.md / audit/*.md with a valid status and real `path:line` evidence
   all    (default) plan + audit when an audit exists
 
 The requirements register and modules come from the design folder (<plan_dir>/../design), via Stark's register.py.
-These checks mirror what `atlasctl gate G3` reads, so a PASS here means G3 can parse the plan.
+`atlas finish jarvis` (and `atlas finish stark` on the small track) runs exactly `verify.py <P>/plan`. These checks
+mirror what gate G3 reads, so a PASS here means G3 can parse the plan.
 """
 from __future__ import annotations
 
@@ -30,7 +32,8 @@ MODULE_BUDGET_KB = 35
 MAX_CELL = 600
 MAX_LINE = 1500
 WP_COLUMNS = ["wp", "title", "phase", "module", "reqs", "depends on", "size", "status"]
-PLANNED_STATUS = ("todo", "blocked", "deferred", "done")   # the planned state; real progress is Atlas's
+PLANNED_STATUS = ("todo", "blocked", "deferred")   # the planned state; real progress is inferred by Atlas
+VERSION_RE = re.compile(r"\|\s*\**Version\**\s*\|\s*\**\s*(v\d+(?:\.\d+)*)", flags=re.I)  # what `atlas finish` reads
 SIZES = ("XS", "S", "M", "L")
 AUDIT_STATUSES = (("done", ("done", "built", "✅")), ("partial", ("partial", "🟡")),
                   ("missing", ("missing", "not started", "not built", "❌")),
@@ -157,8 +160,74 @@ def find_cycle(graph):
     return []
 
 
-def check_plan(root, design, rows, text, fails, warns):
+def built_rows(text):
+    """Rows of PLAN.md's optional `| REQ | Evidence |` table (requirements the audit found already built):
+    list of (REQ ids in the first cell, evidence cell). Read the way gate G3 reads it."""
+    out = []
+    for t in md.tables(text):
+        if t.col("req") != 0 or t.col("evidence") is None:
+            continue
+        ce = t.col("evidence")
+        for r in t.rows:
+            ids = sorted(reg.expand_ranges(r[0] if r else ""), key=reg.req_num)
+            if ids:
+                out.append((ids, r[ce].strip() if ce < len(r) else ""))
+    return out
+
+
+def check_built(root, built, allreq, wp_reqs, repo, fails, warns):
+    """Already-built requirements count as covered only with evidence: `path:line`, or the audit file that holds it."""
+    audit = audit_rows(root)[0]
+    no_ev, soft, not_done, bad = [], [], [], []
+    cache = {}
+    for ids, cell in built:
+        label = ids[0] if len(ids) == 1 else "%s–%s" % (ids[0], ids[-1])
+        ev = EVIDENCE_RE.findall(cell.replace("`", " "))
+        cites_audit = bool(re.search(r"(?i)\baudit(/|\.md)", cell))
+        if not cell.strip("—-–? "):
+            no_ev.append(label)
+        elif not ev and not cites_audit:
+            soft.append(label)
+        for rid in ids:
+            if rid in audit and audit[rid] != "done":
+                not_done.append("%s (audit: %s)" % (rid, audit[rid] or "?"))
+            elif cites_audit and not ev and rid not in audit:
+                not_done.append("%s (no audit row)" % rid)
+        if repo:
+            for fpath, a, b in ev:
+                problem = evidence_problem(repo, fpath, a, b, cache)
+                if problem:
+                    bad.append("%s: %s" % (label, problem))
+    if no_ev:
+        fails.append("`| REQ | Evidence |` rows with no evidence — only code read and cited makes a requirement built: %s"
+                     % ", ".join(no_ev[:20]))
+    if not_done:
+        fails.append("Listed as already built, but the audit does not say `done`: %s — give them a work package."
+                     % ", ".join(not_done[:20]))
+    if bad:
+        fails.append("%d evidence reference(s) in the already-built table do not exist in the repository: %s"
+                     % (len(bad), "; ".join(bad[:10])))
+    if soft:
+        warns.append("Already-built rows whose evidence is neither `path:line` nor an audit file: %s" % ", ".join(soft[:20]))
+    if built and not repo and any(EVIDENCE_RE.search(cell.replace("`", " ")) for _, cell in built):
+        warns.append("Evidence paths in the already-built table were not checked against the code — link the repository "
+                     "(`atlas link-repo`) or pass --repo <code repository root>.")
+    listed = {r for ids, _ in built for r in ids}
+    ghost = sorted(listed - allreq, key=reg.req_num)
+    if ghost:
+        fails.append("The already-built table cites REQ IDs that are not in the register: %s" % ", ".join(ghost[:30]))
+    both = sorted(listed & wp_reqs, key=reg.req_num)
+    if both:
+        warns.append("Requirements both listed as already built and scheduled in a work package (a partial one "
+                     "belongs only in its work package): %s" % ", ".join(both[:30]))
+    return listed
+
+
+def check_plan(root, design, rows, text, fails, warns, repo=None):
     phases, wps = parse_plan(text, fails, warns)
+    if not VERSION_RE.search(text[:3000]):
+        fails.append("PLAN.md has no `| Version | v1.0 — YYYY-MM-DD |` row in its header table — `atlas finish` reads "
+                     "the version from it.")
     if not wps:
         fails.append("No work-package table found in PLAN.md (header `| WP | Title | Phase | Module | REQs | Depends on | Size | Status |`).")
         return
@@ -192,9 +261,11 @@ def check_plan(root, design, rows, text, fails, warns):
     allreq = {r["ID"] for r in reg.active(rows)}
     removed = {r["ID"] for r in rows if r["_removed"]}
     covered = {r for w in wps for r in w["reqs"]}
-    miss = sorted(live - covered, key=reg.req_num)
+    built = check_built(root, built_rows(text), allreq | removed, covered, repo, fails, warns)
+    miss = sorted(live - covered - built, key=reg.req_num)
     if miss:
-        fails.append("%d live requirement(s) are in no work package's REQs column: %s%s"
+        fails.append("%d live requirement(s) are in no work package's REQs column (and not in the `| REQ | Evidence |` "
+                     "table of requirements already built): %s%s"
                      % (len(miss), ", ".join(miss[:50]), " …" if len(miss) > 50 else ""))
     ghost = sorted(covered - allreq - removed, key=reg.req_num)
     if ghost:
@@ -228,19 +299,24 @@ def check_plan(root, design, rows, text, fails, warns):
             fails.append("%s names modules that are not in MODULES.md: %s" % (w["id"], ", ".join(badm)))
         if not w["modules"] and "X" not in w["module_cell"]:
             warns.append("%s names no module (M# or X)." % w["id"])
-        if w["size"] not in SIZES and w["status"] != "done":
+        legacy = w["id"] == "WP-00" and w["status"] == "done"
+        if legacy:
+            warns.append("WP-00 is an old-style baseline row — list requirements that are already built in a "
+                         "`| REQ | Evidence |` table instead (gate G3 counts them as covered) and delete the row.")
+        if w["size"] not in SIZES and not legacy:
             fails.append("%s: Size must be XS, S, M or L (found '%s')." % (w["id"], w["size"]))
         elif w["size"] == "L":
             warns.append("%s is size L — split it if you can (one agent session each)." % w["id"])
-        if w["status"] not in PLANNED_STATUS:
-            fails.append("%s: Status '%s' — PLAN.md holds the planned state only: todo, blocked, deferred (or done for the "
-                         "audited baseline). Atlas records real progress (`atlasctl wp`)." % (w["id"], w["status"]))
+        if w["status"] not in PLANNED_STATUS and not legacy:
+            fails.append("%s: Status '%s' — PLAN.md holds the planned state only: todo, blocked or deferred. Atlas infers "
+                         "real progress from branches, pull requests and commits (`atlas wp` to correct it)."
+                         % (w["id"], w["status"]))
         if not w["reqs"]:
             warns.append("%s lists no REQs (fine for a spike; otherwise cite what it delivers)." % w["id"])
     crit = {m for m, v in mods.items() if v["rigour"] == "Critical"}
     bad = []
     for w in wps:
-        if set(w["modules"]) & crit and w["status"] != "done":
+        if set(w["modules"]) & crit and not (w["id"] == "WP-00" and w["status"] == "done"):
             small = w["size"] in ("XS", "S", "M")
             review = "review" in w["row"].lower()
             if not (small and review):
@@ -252,10 +328,11 @@ def check_plan(root, design, rows, text, fails, warns):
     for m, v in mods.items():
         n = sum(1 for w in wps if m in w["modules"])
         if v["rigour"] == "Light" and n > 2:
-            warns.append("%s is Light but has %d work packages — rigour.md suggests 1–2." % (m, n))
+            warns.append("%s is Light but has %d work packages — a Light module needs 1–2." % (m, n))
     unconf = [m for m, v in mods.items() if not v["confirmed"]]
     if unconf:
-        warns.append("Rigour not confirmed for %s — granularity used the proposed level; Stark/the user must confirm before G2." % ", ".join(unconf))
+        warns.append("Rigour not confirmed for %s — granularity used the proposed level; the user confirms with "
+                     "`atlas rigour --accept [M2=Critical …]` (gate G2 needs it)." % ", ".join(unconf))
 
     # acceptance criteria referenced by the plan
     defined = {a for a, _, _ in reg.ac_rows(design)}
@@ -266,8 +343,10 @@ def check_plan(root, design, rows, text, fails, warns):
     by_size = {}
     for w in wps:
         by_size[w["size"] or "?"] = by_size.get(w["size"] or "?", 0) + 1
-    print("Plan: %d phase(s), %d work package(s) (%s), %d of %d live REQs covered."
-          % (len(phases), len(wps), ", ".join("%s %d" % kv for kv in sorted(by_size.items())), len(live & covered), len(live)))
+    print("Plan: %d phase(s), %d work package(s) (%s), %d of %d live REQs covered%s."
+          % (len(phases), len(wps), ", ".join("%s %d" % kv for kv in sorted(by_size.items())),
+             len(live & (covered | built)), len(live),
+             (" (%d already built)" % len(live & built - covered)) if built else ""))
     return wps
 
 
@@ -280,7 +359,8 @@ def check_briefs(root, wps, warns):
         if nob:
             warns.append("%s: no branch name like `%s-short-title` for %s — Atlas matches commits by branch." % (rel(p, root), nob[0], ", ".join(nob)))
         if re.search(r"(?i)update .*PLAN\.md.*(status|done)", text):
-            warns.append("%s tells agents to edit PLAN.md statuses — progress is recorded by Atlas, not in PLAN.md." % rel(p, root))
+            warns.append("%s tells agents to edit PLAN.md statuses — Atlas infers progress from branches, pull requests "
+                         "and commits; PLAN.md is not edited as work happens." % rel(p, root))
 
 
 # ------------------------------------------------------------------ audit
@@ -328,16 +408,35 @@ def linked_repo(root):
     return None
 
 
-def check_audit(root, rows, repo, fails, warns):
+def evidence_problem(repo, fpath, a, b, cache, shortened=None):
+    """'' when `fpath:a[-b]` exists in the repository, else a short description of what is wrong."""
+    if fpath.count("(") != fpath.count(")"):
+        fpath = fpath.lstrip("(").rstrip(")")
+    full = os.path.join(repo, fpath)
+    if full not in cache:
+        cache[full] = line_count(full)
+    n = cache[full]
+    if n is None:
+        hits = suffix_matches(repo, fpath)
+        if len(hits) != 1:
+            return "%s (%s)" % (fpath, "no such file" if not hits else "ambiguous: %d files match" % len(hits))
+        if shortened is not None:
+            shortened.add(fpath)
+        n = cache.setdefault(hits[0], line_count(hits[0]))
+    if n is None:
+        return "%s (unreadable)" % fpath
+    if int(b or a) > n:
+        return "%s:%s (file has %d lines)" % (fpath, b or a, n)
+    return ""
+
+
+def audit_rows(root):
+    """(REQ → normalised status or None, REQ → evidence cell) from AUDIT.md / audit/*.md."""
     files = sorted(glob.glob(os.path.join(root, "audit", "*.md")))
     main = os.path.join(root, "AUDIT.md")
     if not files and os.path.exists(main):
         files = [main]
-    if not files:
-        fails.append("No audit files found (expected AUDIT.md and audit/<module>.md).")
-        return
-    found, no_status, no_evidence, bad_evidence, shortened = {}, [], [], [], set()
-    cache = {}
+    found, cells_by = {}, {}
     for path in files:
         for header, trows, _ in reg.generic_tables(read(path).split("\n")):
             names = [h.strip().lower() for h in header]
@@ -349,38 +448,33 @@ def check_audit(root, rows, repo, fails, warns):
                 m = reg.REQ_RE.search(cells[0]) if cells else None
                 if not m or s_i >= len(cells):
                     continue
-                rid, status = m.group(0), norm_status(cells[s_i])
-                found[rid] = status
-                if status is None:
-                    no_status.append(rid)
-                    continue
-                if status == "missing":
-                    continue
-                cell = cells[e_i] if e_i is not None and e_i < len(cells) else " ".join(cells[s_i + 1:])
-                ev = EVIDENCE_RE.findall(cell.replace("`", " "))
-                if not ev and status != "unclear":
-                    no_evidence.append(rid)
-                for fpath, a, b in ev:
-                    if fpath.count("(") != fpath.count(")"):
-                        fpath = fpath.lstrip("(").rstrip(")")
-                    if repo is None:
-                        continue
-                    full = os.path.join(repo, fpath)
-                    if full not in cache:
-                        cache[full] = line_count(full)
-                    n = cache[full]
-                    if n is None:
-                        hits = suffix_matches(repo, fpath)
-                        if len(hits) == 1:
-                            shortened.add(fpath)
-                            n = cache.setdefault(hits[0], line_count(hits[0]))
-                        else:
-                            bad_evidence.append("%s: %s (%s)" % (rid, fpath, "no such file" if not hits else "ambiguous: %d files match" % len(hits)))
-                            continue
-                    if n is None:
-                        bad_evidence.append("%s: %s (unreadable)" % (rid, fpath))
-                    elif int(b or a) > n:
-                        bad_evidence.append("%s: %s:%s (file has %d lines)" % (rid, fpath, b or a, n))
+                found[m.group(0)] = norm_status(cells[s_i])
+                cells_by[m.group(0)] = cells[e_i] if e_i is not None and e_i < len(cells) else " ".join(cells[s_i + 1:])
+    return found, cells_by
+
+
+def check_audit(root, rows, repo, fails, warns):
+    if not glob.glob(os.path.join(root, "audit", "*.md")) and not os.path.exists(os.path.join(root, "AUDIT.md")):
+        fails.append("No audit files found (expected AUDIT.md and audit/<module>.md).")
+        return
+    found, cells_by = audit_rows(root)
+    no_status, no_evidence, bad_evidence, shortened = [], [], [], set()
+    cache = {}
+    for rid, status in found.items():
+        if status is None:
+            no_status.append(rid)
+            continue
+        if status == "missing":
+            continue
+        ev = EVIDENCE_RE.findall(cells_by[rid].replace("`", " "))
+        if not ev and status != "unclear":
+            no_evidence.append(rid)
+        if repo is None:
+            continue
+        for fpath, a, b in ev:
+            problem = evidence_problem(repo, fpath, a, b, cache, shortened)
+            if problem:
+                bad_evidence.append("%s: %s" % (rid, problem))
     act = [r["ID"] for r in reg.live(rows)]
     missing = [r for r in act if r not in found]
     if missing:
@@ -434,7 +528,7 @@ def main():
         if plan_path not in docs:
             fails.append("Missing PLAN.md")
         else:
-            wps = check_plan(root, design, rows, docs[plan_path], fails, warns)
+            wps = check_plan(root, design, rows, docs[plan_path], fails, warns, repo or linked_repo(root))
             if wps:
                 check_briefs(root, wps, warns)
     if stage == "audit" or (stage == "all" and has_audit):

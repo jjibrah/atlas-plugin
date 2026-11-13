@@ -2,7 +2,10 @@
 
 > A plain-language guide to what we're building, for the team and anyone joining it. For the full technical detail, see [TECHNICAL.md](TECHNICAL.md). The client-facing description of the work is Alice's proposal, not this file.
 
-**Version:** {{v1.0 — YYYY-MM-DD}} · **System size:** {{Small / Medium / Large}} · **Starting point:** {{new system / extends the existing system}}
+| | |
+|---|---|
+| Version | {{v1.0 — YYYY-MM-DD}} |
+| System | {{Small / Medium / Large}} · {{new system / extends the existing system}} |
 
 ---
 
@@ -79,7 +82,7 @@ The rest stay in the technical documents. -->
 
 **Things we've assumed (please confirm):** {{the 3–6 assumptions with the biggest impact, in plain words}}
 
-**More detail:** {{the full list of decisions and questions is in DECISIONS.md — or "in the technical blueprint" for a small system. Questions only the client can answer are sent through the discovery questions file.}}
+**More detail:** {{the full list of decisions and questions is in DECISIONS.md — or "in the technical blueprint" for a small system.}}
 
 ## 8. Glossary
 

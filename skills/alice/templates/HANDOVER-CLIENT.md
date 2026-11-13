@@ -1,6 +1,9 @@
 # {{Project name}} — Handover pack
 
-**For:** {{Client}} · **From:** {{author}} · **Date:** {{YYYY-MM-DD}}
+| For | {{Client}} |
+|---|---|
+| From | {{author}} |
+| Version | {{v1.0 — YYYY-MM-DD}} |
 
 <!-- TEMPLATE NOTE — delete before finishing. For the client. Plain words, their vocabulary, no internal IDs, no source
 tags, no technical terms, no prices, no internal risks or opinions. Only what is in HANDOVER.md, said simply. Never

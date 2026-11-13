@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""ALICE helper (ATLAS plugin). <P> is the project storage folder (`atlasctl where`); Alice's files live in
-<P>/discovery/ (PRD.md, PROPOSAL.md, QUESTIONS.md, _work/). <P> may be omitted: the script then asks atlasctl.
+"""ALICE helper (ATLAS plugin). <P> is the project storage folder (the `P =` line of `atlas begin alice`); Alice's
+files live in <P>/discovery/ (PRD.md, PROPOSAL.md, QUESTIONS.md, _work/). <P> may be omitted: the script then asks
+atlasctl for the current project.
 
-  alice.py init   [<P>]          create discovery/_work/ and STATE.md (does nothing to files that exist)
-  alice.py next   [<P>] [KIND]   next free ID (all kinds, or one: FR PP WF P Q D RS ASM BR U M) — never reuse an ID
-  alice.py check  [<P>]          verify PRD.md, PROPOSAL.md and QUESTIONS.md (exit 1 on any FAIL)
-  alice.py status [<P>]          counts: meetings, requirements by status, proposals, open questions, unprocessed sources
-  alice.py check-client <file>   verify a client-facing document (client update, handover pack, proposal):
+  alice.py init    [<P>]         create discovery/_work/ and STATE.md (existing files are left alone); says which PRD
+                                 template fits the project size and whether client files are waiting
+  alice.py convert [<P>]         convert new or changed client files into chunks (runs lib/convert_docs.py)
+  alice.py next    [<P>] [KIND]  next free ID (all kinds, or one: FR PP WF P Q D RS ASM BR U M) — never reuse an ID
+  alice.py check   [<P>]         verify PRD.md, PROPOSAL.md and QUESTIONS.md (exit 1 on any FAIL); `atlas finish alice`
+                                 runs this. On PASS it saves what the proposal was written from (for `changed`)
+  alice.py changed [<P>] [--mark]  requirements, rules, pain points and proposals that are new, changed or removed
+                                 since the current PROPOSAL version was written, with the proposal section each touches.
+                                 --mark: the proposal needs no change — record it as up to date
+  alice.py status  [<P>]         counts: meetings, requirements by status, questions, unprocessed sources, what waits
+  alice.py check-client <file>   verify a client-facing document (client update, handover pack):
                                  no internal IDs or source tags, no jargon, no template leftovers, prices flagged
+
+Two PRD layouts pass the check: templates/PRD.md (full, 23 sections) and templates/PRD-small.md (10 sections, for
+Small projects). Gate G1 reads regulations only from a section headed `## 15.`; the check asks for that heading when the
+project is not Small, a module is Standard or Critical, or the regulations flag something for legal advice.
 
 ID formats: FR-001 (functional requirement), BR-01 (business rule), PP-01 (pain point), WF-01 (workflow),
 P-01 (proposal), Q-001 (question for the client), D-01 (decision), RS-01 (research source), ASM-01 (assumption the
@@ -19,6 +30,7 @@ Text between <!-- legend:start --> and <!-- legend:end --> is ignored (example t
 from __future__ import annotations
 
 import collections
+import datetime
 import glob
 import json
 import os
@@ -52,8 +64,8 @@ JARGON = ("api", "endpoint", "database", "schema", "json", "webhook", "backend",
           "server-side", "repository", "deployment", "oauth", "jwt", "postgres", "react", "kubernetes", "docker")
 STATE_SKELETON = """# ALICE state
 
-Client, Project and Author come from atlas.json (`atlasctl status --json` → project). Fill the rows below only when
-atlas.json lacks them (the user tells you); a value here overrides an empty atlas.json field.
+Client, Project and Author come from atlas.json (shown in the `atlas begin alice` brief). Fill the rows below only
+when atlas.json lacks them (the user tells you); a value here is used when the atlas.json field is empty.
 
 | | |
 |---|---|
@@ -73,7 +85,8 @@ Every source document and what it is. `Processed`: `yes` once it is fully reflec
 Kinds: meeting transcript · meeting notes · SOP · client document · answers · other
 
 ## Unclear points for the user
-Collected while reading; asked in one batch. Answered ones move to PRD §21.4 as U-## rows.
+Collected while reading (and from other agents' notes); asked in one batch. Each becomes a U-## row in the
+PRD's *Clarifications from our team* table.
 
 ## Run log
 | Date | What changed |
@@ -81,7 +94,12 @@ Collected while reading; asked in one batch. Answered ones move to PRD §21.4 as
 """
 
 
-LIB = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "lib")
+SKILL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LIB = os.path.join(os.path.dirname(os.path.dirname(SKILL)), "lib")
+BASIS = "proposal-basis.json"  # in discovery/_work/: the PRD rows the current proposal version was written from
+LEGAL_RX = re.compile(r"(?i)\b(lawyer|legal advice|legal review|counsel)\b")  # the words gate G1 looks for
+DOC_EXT = (".vtt", ".srt", ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".txt", ".md", ".rtf", ".csv")
+VERSION_HINT = "a header table with the row '| Version | v0.1 — YYYY-MM-DD |' (`atlas finish` logs the version from it)"
 # Internal identifiers that must never reach the client (Q-numbers are allowed: the client answers by them).
 INTERNAL_ID_RE = re.compile(r"\b(?:FR-\d{2,}|BR-\d+|PP-\d+|WF-\d+|RS-\d+|ASM-T?\d+|U-\d+|(?<![A-Z])P-\d+|(?<![A-Z])D-\d+"
                             r"|REQ-\d+|AC-\d+|WP-\d+|TC-\d+|CR-\d+|AD-\d+|OQ-\d+|PRJ-\d+|M\d{1,2}|G[1-5]|P\d{1,2})\b")
@@ -247,11 +265,195 @@ def all_texts(p):
     return texts
 
 
+def version_of(text):
+    """Version from a document's header table — the same row `atlas finish` reads (first 3000 characters)."""
+    m = re.search(r"\|\s*\**Version\**\s*\|\s*\**\s*(v\d+(?:\.\d+)*)", (text or "")[:3000], flags=re.I)
+    return m.group(1) if m else ""
+
+
+def source_files(p):
+    """Client files in discovery/sources/ (ATLAS's placeholder README.txt and hidden files do not count)."""
+    src, out = os.path.join(p["alice"], "sources"), []
+    for base, dirs, files in os.walk(src):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        out += [os.path.relpath(os.path.join(base, f), src) for f in files
+                if not f.startswith(".") and not (base == src and f == "README.txt")]
+    return sorted(out)
+
+
+def loose_documents(p):
+    """Documents in the folder the user is working in — candidates for `atlas intake .`. Project folders, code
+    repositories and the home folder are never offered."""
+    cwd, root = os.path.realpath(os.getcwd()), os.path.realpath(p["root"])
+    if cwd in (os.path.realpath(os.path.expanduser("~")), os.path.dirname(cwd)) or (cwd + os.sep).startswith(root + os.sep) \
+            or root.startswith(cwd + os.sep):
+        return cwd, []
+    if any(os.path.exists(os.path.join(cwd, m)) for m in ("atlas.json", ".git", "package.json", "pyproject.toml", "SKILL.md")):
+        return cwd, []
+    skip = re.compile(r"^(readme|license|changelog|claude|agents|contributing)\b", re.I)
+    found = []
+    for base, dirs, files in os.walk(cwd):
+        deep = base != cwd and os.path.relpath(base, cwd).count(os.sep) >= 1
+        dirs[:] = [] if deep else [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "_work")]
+        found += [os.path.relpath(os.path.join(base, f), cwd) for f in sorted(files)
+                  if f.lower().endswith(DOC_EXT) and not f.startswith(".") and not skip.match(f)]
+        if len(found) > 200:
+            break
+    return cwd, found
+
+
+def standard_scope(p):
+    """Why gate G1's regulations check applies ('' when it does not): the project is not Small, or a module is
+    Standard or Critical. Same rule as lib/gates.py scope_flags."""
+    if atlas_meta(p).get("size", "Medium") != "Small":
+        return "the project is not Small"
+    levels = {}
+    for header, rows in tables(read(os.path.join(p["root"], "design", "MODULES.md")) or ""):
+        mi, ri = col(header, "module"), col(header, "rigour", "rigor")
+        if mi is None or ri is None:
+            continue
+        for r in rows:
+            mid = cell(r, mi).strip("* ")
+            if re.match(r"^M\d+$", mid):
+                levels[mid] = cell(r, ri).strip("* ").capitalize()
+    for line in (read(os.path.join(p["root"], "log", "events.jsonl")) or "").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "rigour.set" and ev.get("data", {}).get("module") in levels:
+            levels[ev["data"]["module"]] = ev["data"].get("level", "")
+    high = sorted(m for m, lv in levels.items() if lv in ("Standard", "Critical"))
+    return ("module %s is %s" % (high[0], levels[high[0]])) if high else ""
+
+
+def regulations(prd):
+    """(body, in_section_15) of the PRD's regulations section; body is None when there is none. The full template has
+    `## 15. Regulations and compliance` (gate G1 reads that heading); the small one a sub-section named Regulations."""
+    text = re.sub(r"<!--.*?-->", "", strip_code(prd), flags=re.S)
+    m = re.search(r"^## 15\.?\s.*$", text, flags=re.M)
+    if m:
+        end = re.search(r"^## ", text[m.end():], flags=re.M)
+        return (text[m.end():][:end.start()] if end else text[m.end():]), True
+    for levels in ("{3,4}", "{2}"):
+        m = re.search(r"^(#%s)\s[^\n]*regulat[^\n]*$" % levels, text, flags=re.M | re.I)
+        if m:
+            end = re.search(r"^#{1,%d}\s" % len(m.group(1)), text[m.end():], flags=re.M)
+            return (text[m.end():][:end.start()] if end else text[m.end():]), False
+    return None, False
+
+
+def open_question_counts(questions):
+    """(open, open and needed before we start) — counted the way atlasctl counts them."""
+    total = blocking = 0
+    sect = ""
+    for ln in re.sub(r"<!--.*?-->", "", questions or "", flags=re.S).splitlines():
+        if ln.startswith("## "):
+            sect = ln.lower()
+        if re.match(r"^\|\s*\**Q-\d+", ln) and "already answered" not in sect \
+                and split_row(ln)[-1].lower().strip("*` ") in ("open", "sent", "waiting"):
+            total += 1
+            blocking += "before we start" in sect
+    return total, blocking
+
+
+# ------------------------------------------------------------------ what the proposal was written from
+def prd_rows(p):
+    """PRD rows a proposal is distilled from: id → {h, text, priority, status, source, area}. FR and BR rows come from
+    lib/flow.py (the fingerprint Atlas uses to tell Stark what changed); pain points and proposals are added here.
+    None when <P> is not an ATLAS project or the core library is missing."""
+    if not os.path.exists(p["atlas"]):
+        return None
+    if LIB not in sys.path:
+        sys.path.insert(0, LIB)
+    try:
+        import atlasctl as A
+        import flow
+        import mdtables as md
+        from pathlib import Path
+        proj = A.Project(Path(p["root"]), {})
+    except (ImportError, SystemExit):
+        return None
+    rows = flow.fr_rows(proj)
+    for t in md.read_tables(Path(p["prd"])):
+        ci = t.col("id")
+        if ci is None:
+            continue
+        for r in t.rows:
+            rid = (r[ci] if ci < len(r) else "").strip("* ~")
+            if rid in rows:
+                rows[rid]["area"] = t.heading
+            elif re.match(r"^(PP|P)-\d+$", rid):
+                g = lambda *n: cell(r, t.col(*n)).strip()  # noqa: E731
+                rows[rid] = {"text": g("pain point", "proposal"), "priority": g("kind"), "status": g("status"),
+                             "source": g("source"), "area": t.heading,
+                             "h": flow._h([c for i, c in enumerate(r) if i != ci])}
+    return rows
+
+
+def basis_path(p):
+    return os.path.join(p["work"], BASIS)
+
+
+def load_basis(p):
+    try:
+        with open(basis_path(p), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_basis(p, rows, prd, proposal):
+    os.makedirs(p["work"], exist_ok=True)
+    data = {"proposal": version_of(proposal), "prd": version_of(prd), "at": datetime.date.today().isoformat(),
+            "rows": {k: {"h": v["h"], "p": v["priority"], "s": v["status"]} for k, v in sorted(rows.items())}}
+    with open(basis_path(p), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=0, sort_keys=True)
+    return data
+
+
+def proposal_drift(p, prd, proposal):
+    """(basis, rows, added, changed, removed) against the saved basis; basis is None when nothing is saved yet and
+    rows is None when the rows cannot be read."""
+    rows, basis = prd_rows(p), load_basis(p)
+    if rows is None or basis is None:
+        return basis, rows, [], [], []
+    old = {k: v["h"] for k, v in basis.get("rows", {}).items()}
+    new = {k: v["h"] for k, v in rows.items()}
+    return (basis, rows, sorted((k for k in new if k not in old), key=id_key),
+            sorted((k for k in new if k in old and old[k] != new[k]), key=id_key),
+            sorted((k for k in old if k not in new), key=id_key))
+
+
+def id_key(i):
+    return (i.split("-")[0], num(i))
+
+
+def proposal_place(rid, status, source, optional):
+    """The proposal section (templates/PROPOSAL.md) a PRD row is told in."""
+    st = status.lower().strip("*` ")
+    if rid.startswith("PP-"):
+        return "The challenges you are facing (and the challenge → solution table)"
+    if st.startswith(("rejected", "out of scope")):
+        return "Not included"
+    if st.startswith("deferred"):
+        return "Not included, or a later phase in How we will deliver it"
+    if rid.startswith("P-"):
+        if st.startswith(("accepted", "partly")):
+            return "What is included (no longer a suggestion)"
+        return "Our suggestions" if rid in optional else "What we propose"
+    if st.startswith("proposed") and set(re.findall(r"(?<![A-Z])P-\d+", source)) & optional:
+        return "Our suggestions"
+    if st.startswith("to confirm"):
+        return "What is included (worded as still to be agreed) and Open points"
+    return "What is included, and How it will work for each person if their day changes"
+
+
 # ------------------------------------------------------------------ commands
 def cmd_init(folder):
     p = paths(folder)
     if not os.path.exists(p["atlas"]):
-        print("WARN  %s has no atlas.json — is this the project folder (`atlasctl where`)?" % p["root"])
+        print("WARN  %s has no atlas.json — is this the project folder (the `P =` line of `atlas begin alice`)?" % p["root"])
     os.makedirs(p["meetings"], exist_ok=True)
     os.makedirs(os.path.join(p["alice"], "sources"), exist_ok=True)
     os.makedirs(p["reports"], exist_ok=True)
@@ -263,12 +465,131 @@ def cmd_init(folder):
             f.write(STATE_SKELETON % {k: meta.get(k, "") for k in ("client", "name", "author")})
         print("created: %s" % p["state"])
     who = identity(p)
+    size = atlas_meta(p).get("size") or "?"
     missing = [k for k in ("client", "name", "author") if not who[k]]
-    print("Client: %s · Project: %s · Author: %s" % (who["client"] or "?", who["name"] or "?", who["author"] or "?"))
+    print("Client: %s · Project: %s · Author: %s · Size: %s" % (who["client"] or "?", who["name"] or "?",
+                                                              who["author"] or "?", size))
     if missing:
         print("MISSING %s — ask the user, then record it in %s" % (", ".join(missing), p["state"]))
-    print("Client files: %s" % os.path.join(p["alice"], "sources"))
+    prd = read(p["prd"])
+    if prd is not None:
+        print("PRD %s exists — update it in place, never restart from a template." % (version_of(prd) or "(no version)"))
+    elif size == "Small":
+        print("PRD template: %s (Small project: 10 sections)" % os.path.join(SKILL, "templates", "PRD-small.md"))
+    else:
+        print("PRD template: %s (full, 23 sections)" % os.path.join(SKILL, "templates", "PRD.md"))
+    src = os.path.join(p["alice"], "sources")
+    files = source_files(p)
+    if files:
+        print("Client files: %d in %s" % (len(files), src))
+    else:
+        print("Client files: NONE in %s. The user adds them with `atlas intake <files or folder>`." % src)
+        cwd, loose = loose_documents(p)
+        if loose:
+            print("  The folder you were started in (%s) holds %d document(s): %s%s.\n"
+                  "  Offer to import it — after the user agrees, run from that folder: atlas intake ."
+                  % (cwd, len(loose), ", ".join(loose[:6]), " …" if len(loose) > 6 else ""))
+    waiting_lines(read(p["prd"]) or "", read(p["questions"]) or "")
     print("Output folder: %s" % p["alice"])
+
+
+def waiting_lines(prd, questions):
+    """What an earlier run left open: client answers not applied yet, clarifications pending with the user."""
+    waiting = answers_waiting(questions)
+    if waiting:
+        print("Client answers waiting to be applied: %s" % ", ".join(waiting))
+    pend_u = [r[0].strip("* ") for h, rows in tables(prd) for r in rows
+              if r and re.match(r"\**U-\d+", r[0]) and col(h, "status") is not None
+              and cell(r, col(h, "status")).lower().startswith("pending")]
+    if pend_u:
+        print("Waiting on you (our team): %s" % ", ".join(pend_u))
+
+
+def unprocessed(p):
+    """Live source documents that STATE.md does not mark as processed."""
+    m, state = manifest(p), read(p["state"]) or ""
+    if not m:
+        return []
+    return ["%s (%s)" % (code, d["file"]) for code, d in sorted(m["docs"].items(), key=lambda kv: int(kv[0][1:]))
+            if d.get("state") != "REMOVED" and not processed(state, code)]
+
+
+def cmd_convert(folder, extra):
+    p = paths(folder)
+    src, out = os.path.join(p["alice"], "sources"), os.path.join(p["work"], "sources")
+    conv = os.path.join(LIB, "convert_docs.py")
+    if not source_files(p):
+        sys.exit("No client files in %s — the user adds them with `atlas intake <files or folder>`." % src)
+    r = subprocess.run([sys.executable, conv, src, out] + list(extra), capture_output=True, text=True)
+    text = (r.stdout or "") + (r.stderr or "")
+    sys.stdout.write(text if text.endswith("\n") else text + "\n")
+    if r.returncode:
+        sys.exit(r.returncode)
+    if re.search(r"\|\s*CHANGED\b", text):
+        print("CHANGED files: set Processed back to `no` in STATE.md and read only what changed:\n"
+              "  python3 %s diff %s dN.prev dN" % (conv, out))
+    if "Chunks needing attention" in text:
+        print("After describing visual chunks or writing needs-read chunks: python3 %s reindex %s" % (conv, out))
+    todo = unprocessed(p)
+    if todo:
+        print("To read and digest (not yet Processed = yes in STATE.md): %s" % "; ".join(todo))
+    else:
+        print("Nothing new or changed — skip digesting.")
+
+
+def cmd_changed(folder, mark=False):
+    p = paths(folder)
+    prd, proposal = read(p["prd"]), read(p["proposal"])
+    if prd is None:
+        sys.exit("No PRD yet at %s." % p["prd"])
+    basis, rows, added, changed, removed = proposal_drift(p, prd, proposal)
+    if rows is None:
+        sys.exit("Cannot read the PRD rows: %s is not an ATLAS project folder (no atlas.json), or %s is missing."
+                 % (p["root"], LIB))
+    if mark:
+        if proposal is None:
+            sys.exit("No PROPOSAL.md yet — nothing to mark.")
+        b = save_basis(p, rows, prd, proposal)
+        print("Saved: PROPOSAL %s is up to date with PRD %s (%d rows)." % (b["proposal"] or "(no version)",
+                                                                         b["prd"] or "(no version)", len(rows)))
+        return
+    if proposal is None:
+        print("No PROPOSAL.md yet — write all of it from templates/PROPOSAL.md.")
+        return
+    if basis is None:
+        print("Nothing saved yet about what PROPOSAL %s was written from (it is saved when `alice.py check` passes).\n"
+              "Review the whole proposal against the PRD this once." % (version_of(proposal) or "(no version)"))
+        return
+    head = "PROPOSAL %s was written from PRD %s (%s); the PRD is now %s" % (
+        basis.get("proposal") or "?", basis.get("prd") or "?", basis.get("at", "?"), version_of(prd) or "?")
+    if not (added or changed or removed):
+        print("%s. No requirement, rule, pain point or proposal changed since — the proposal needs no update for them." % head)
+        return
+    print("%s. Since then: %d new, %d changed, %d removed." % (head, len(added), len(changed), len(removed)))
+    optional = {k for k, v in rows.items() if k.startswith("P-") and "optional" in v["priority"].lower()}
+    short = lambda t: t if len(t) <= 140 else t[:137] + "…"  # noqa: E731
+    places = collections.OrderedDict()
+    for label, ids in (("NEW", added), ("CHANGED", changed)):
+        for i in ids:
+            v = rows[i]
+            was = basis["rows"].get(i, {})
+            tags = " · ".join(x for x in (v["priority"], v["status"]) if x)
+            if label == "CHANGED" and (was.get("p"), was.get("s")) != (v["priority"], v["status"]):
+                tags += "; was " + " · ".join(x for x in (was.get("p"), was.get("s")) if x)
+            place = proposal_place(i, v["status"], v["source"], optional)
+            if (was.get("s") or "").lower().startswith("to confirm") and not v["status"].lower().startswith("to confirm"):
+                place += "; no longer pending in Open points / What we need from you"
+            places.setdefault(place, []).append(i)
+            print("%-7s %s [%s] %s%s" % (label, i, tags, short(v["text"]), ("  (%s)" % v["area"]) if v.get("area") else ""))
+    for i in removed:
+        places.setdefault("Not included (after restoring the row as rejected or out of scope)", []).append(i)
+        print("REMOVED %s (was %s) — rows are never deleted: restore it with status rejected or out of scope and the reason"
+              % (i, basis["rows"][i].get("s") or "?"))
+    print("Proposal sections to rewrite — only these:")
+    for place, ids in places.items():
+        print("  - %s: %s" % (place, ", ".join(ids)))
+    print("Then raise the PROPOSAL version. If none of this changes what the client reads: alice.py changed %s --mark"
+          % p["root"])
 
 
 def cmd_next(folder, only=None):
@@ -308,30 +629,29 @@ def cmd_status(folder):
                 qs[cell(r, si).lower().strip("*` ") or "(blank)"] += 1
     meetings = sorted(defined_ids(prd, "M"))
     who = identity(p)
-    vm = re.search(r"^\|\s*Version\s*\|\s*(v[\d.]+)", prd, flags=re.M)
-    print("Project: %s · Client: %s · Author: %s · PRD %s" % (who["name"] or "?", who["client"] or "?",
-                                                         who["author"] or "?", vm.group(1) if vm else "not written yet"))
+    proposal = read(p["proposal"])
+    print("Project: %s · Client: %s · Author: %s" % (who["name"] or "?", who["client"] or "?", who["author"] or "?"))
+    print("Documents: " + " · ".join("%s %s" % (n, (version_of(t) or "(no version)") if t else "not written yet")
+                                      for n, t in (("PRD", prd), ("PROPOSAL", proposal), ("QUESTIONS", questions))))
     print("Meetings: %d (%s)" % (len(meetings), ", ".join(meetings) or "none yet"))
     print("Functional requirements: %d — %s" % (sum(fr.values()), ", ".join("%d %s" % (v, k) for k, v in fr.most_common()) or "none"))
     print("Pain points: %d · Proposals: %d · Decisions: %d" % (len(defined_ids(prd, "PP")), len(defined_ids(prd, "P")), len(defined_ids(prd, "D"))))
-    print("Questions: %s" % (", ".join("%d %s" % (v, k) for k, v in qs.most_common()) or "none"))
+    print("Questions: %s%s" % (", ".join("%d %s" % (v, k) for k, v in qs.most_common()) or "none",
+                               (" — %d needed before we start" % open_question_counts(questions)[1]) if qs.get("open") else ""))
     m = manifest(p)
-    state = read(p["state"]) or ""
+    known = {d.get("file") for d in (m or {"docs": {}})["docs"].values()}
+    fresh = [f for f in source_files(p) if f not in known]
+    if fresh:
+        print("Client files not converted yet: %s%s (alice.py convert)" % (", ".join(fresh[:8]), " …" if len(fresh) > 8 else ""))
     if m:
-        pending = []
-        for code, d in sorted(m["docs"].items(), key=lambda kv: int(kv[0][1:])):
-            if d.get("state") == "REMOVED":
-                continue
-            if not processed(state, code):
-                pending.append("%s (%s)" % (code, d["file"]))
-        print("Sources not yet processed: %s" % ("; ".join(pending) if pending else "none"))
-    waiting = answers_waiting(questions)
-    if waiting:
-        print("Client answers waiting to be applied: %s" % ", ".join(waiting))
-    pend_u = [r[0].strip("* ") for h, rows in tables(prd) for r in rows
-              if r and re.match(r"\**U-\d+", r[0]) and col(h, "status") is not None and cell(r, col(h, "status")).lower().startswith("pending")]
-    if pend_u:
-        print("Waiting on you (our team): %s" % ", ".join(pend_u))
+        print("Sources not yet processed: %s" % ("; ".join(unprocessed(p)) or "none"))
+    waiting_lines(prd, questions)
+    if prd and proposal:
+        basis, _, added, changed, removed = proposal_drift(p, prd, proposal)
+        n = len(added) + len(changed) + len(removed)
+        if basis is not None and n:
+            print("Proposal %s is behind the PRD: %d row(s) changed since it was written (alice.py changed)."
+                  % (version_of(proposal) or "?", n))
 
 
 def processed(state, code):
@@ -416,7 +736,7 @@ def cmd_check(folder):
         if unrec:
             fails.append("Sources not marked processed (Processed = yes) in STATE.md → Sources: %s" % "; ".join(unrec[:10]))
     else:
-        warns.append("No source manifest — run convert_docs.py first.")
+        warns.append("No source manifest — run `alice.py convert <P>` first.")
     digests = " ".join(os.path.basename(f) for f in glob.glob(os.path.join(p["meetings"], "*.md")))
     no_digest = sorted(mid for mid in defined["M"] if mid not in digests)
     if no_digest:
@@ -554,10 +874,10 @@ def cmd_check(folder):
     elif author.lower() not in ("none", "no branding", "-", "—") and author.lower() not in proposal.lower():
         fails.append("PROPOSAL.md does not show the author '%s'." % author)
 
-    # 7. structure that atlasctl and the gates read
+    # 7. structure that Atlas and the gates read
     for heading in ("## Needed before we start", "## Can be answered later", "## Already answered"):
         if not re.search(r"^%s\s*$" % re.escape(heading), questions, flags=re.M | re.I):
-            fails.append("QUESTIONS.md lacks the section '%s' (atlasctl counts open questions by section)." % heading)
+            fails.append("QUESTIONS.md lacks the section '%s' (Atlas counts open questions by section)." % heading)
     q_valid = Q_STATUSES + ("sent", "waiting")
     for header, rows in tables(questions):
         if not any(r and re.match(r"\**Q-\d{3}", r[0]) for r in rows):
@@ -571,26 +891,63 @@ def cmd_check(folder):
             if r and re.match(r"\**Q-\d{3}", r[0]):
                 last = r[-1].lower().strip("*` ")
                 if not last.startswith(q_valid):
-                    fails.append("%s: last cell '%s' is not a status (open, answered, withdrawn) — atlasctl reads it."
+                    fails.append("%s: last cell '%s' is not a status (open, answered, withdrawn) — Atlas reads it."
                                  % (r[0].strip("* "), r[-1][:30]))
     fr_tables = [h for h, rows in tables(prd) if any(r and re.match(r"\**FR-\d{3}", r[0]) for r in rows)]
     for h in fr_tables:
         if not h or h[0].strip("* ") != "id" or col(h, "priority") is None or col(h, "status") is None:
             fails.append("PRD.md: every FR table needs the columns ID … Priority … Status (header now: %s)." % " | ".join(h))
             break
-    if not re.search(r"^## 15\.\s", prd, flags=re.M):
-        fails.append("PRD.md: the regulations section must be numbered '## 15. Regulations and compliance' (G1 reads it).")
-    if not re.search(r"^\|\s*Version\s*\|\s*v\d+\.\d+", prd, flags=re.M):
-        fails.append("PRD.md header has no '| Version | v0.1 — YYYY-MM-DD |' row (needed for doc.version events).")
+    regs, in_15 = regulations(prd)
+    if regs is None:
+        fails.append("PRD.md has no regulations section ('## 15. Regulations and compliance' in the full template, "
+                     "'### 8.4 Regulations and compliance' in the small one). Write 'None identified.' if none apply.")
+    else:
+        reg_rows = [ln for ln in regs.splitlines() if ln.strip().startswith("|") and not re.match(r"^\s*\|?\s*:?-{2,}", ln)]
+        if len(reg_rows) < 2 and "none identified" not in regs.lower():
+            fails.append("PRD.md: the regulations section is empty — list the rules that apply, or write 'None identified.'")
+        why = standard_scope(p) or ("it flags something for legal advice" if LEGAL_RX.search(regs) else "")
+        if why and not in_15:
+            fails.append("PRD.md: gate G1 reads regulations only from a section headed '## 15. Regulations and compliance', "
+                         "and here it applies (%s). Move the regulations into their own section with exactly that "
+                         "heading, placed right after the section they are in now." % why)
+    for name, text in (("PRD.md", prd), ("PROPOSAL.md", proposal), ("QUESTIONS.md", questions)):
+        if not version_of(text):
+            fails.append("%s needs %s." % (name, VERSION_HINT))
+    q_open, q_block = open_question_counts(questions)
+    for name, text in (("PRD.md", prd), ("QUESTIONS.md", questions)):
+        m_q = re.search(r"^\|\s*Open questions\s*\|\s*(\d+)(?:[^|\d]*\(\s*(\d+)\s+needed)?", text[:3000], flags=re.M | re.I)
+        if m_q and (int(m_q.group(1)) != q_open or (m_q.group(2) is not None and int(m_q.group(2)) != q_block)):
+            fails.append("%s header says %s open question(s)%s; QUESTIONS.md has %d open, %d of them needed before we start."
+                         % (name, m_q.group(1), (" (%s needed before we start)" % m_q.group(2)) if m_q.group(2) else "",
+                            q_open, q_block))
 
-    # 8. size sanity
+    # 8. what the proposal was written from (for `alice.py changed`)
+    basis, rows, added, changed, removed = proposal_drift(p, prd, proposal)
+    gone = [i for i in removed if i.startswith(("FR-", "BR-"))]
+    if gone:
+        fails.append("Rows deleted from the PRD: %s. IDs are permanent — a dropped requirement or rule keeps its row with "
+                     "status rejected or out of scope and the reason. (Truly intended? `alice.py changed <P> --mark`.)"
+                     % ", ".join(gone[:15]))
+    behind = bool(added or changed or removed) and basis.get("proposal") == version_of(proposal) \
+        and basis.get("prd") != version_of(prd)  # the PRD moved on and the proposal did not
+    if behind:
+        warns.append("PROPOSAL %s was written from PRD %s; %d row(s) changed since (run `alice.py changed <P>`). Rewrite the "
+                     "proposal sections they touch and raise its version, or `alice.py changed <P> --mark` if the client "
+                     "reads nothing different." % (basis.get("proposal") or "?", basis.get("prd") or "?",
+                                                    len(added) + len(changed) + len(removed)))
+
+    # 9. size sanity
     kb = lambda t: len(t.encode("utf-8")) / 1024.0
     if kb(proposal) > 45:
         warns.append("PROPOSAL.md is %d KB — a client will not read that much. Aim for under ~25 KB." % kb(proposal))
     if kb(prd) > 250:
         warns.append("PRD.md is %d KB — consider whether detail is repeated." % kb(prd))
 
-    print("PRD: %d functional requirements · %d meetings · %d questions" % (fr_seen, len(defined["M"]), q_seen))
+    print("PRD %s: %d functional requirements · %d meetings · %d questions (%d open, %d needed before we start)"
+          % (version_of(prd) or "?", fr_seen, len(defined["M"]), q_seen, q_open, q_block))
+    if not fails and rows is not None and not behind:
+        save_basis(p, rows, prd, proposal)  # this proposal version reflects these PRD rows
     report(fails, warns)
 
 
@@ -648,7 +1005,7 @@ def main():
     if a and a[0] in ("-h", "--help"):
         print(__doc__)
         sys.exit(0)
-    if not a or a[0] not in ("init", "next", "check", "status", "check-client"):
+    if not a or a[0] not in ("init", "convert", "next", "check", "changed", "status", "check-client"):
         print(__doc__)
         sys.exit(2)
     if a[0] == "check-client":
@@ -656,6 +1013,16 @@ def main():
             sys.exit("usage: alice.py check-client <file.md>")
         return cmd_check_client(a[1])
     rest = a[1:]
+    if a[0] == "convert":
+        folder = rest.pop(0) if rest and not rest[0].startswith("-") else None
+        return cmd_convert(resolve_project(folder), rest)
+    if a[0] == "changed":
+        mark = "--mark" in rest
+        rest = [x for x in rest if x != "--mark"]
+        if len(rest) > 1:
+            print(__doc__)
+            sys.exit(2)
+        return cmd_changed(resolve_project(rest[0] if rest else None), mark)
     if a[0] == "next":
         kind = None
         if rest and rest[-1].upper() in KINDS and not os.path.isdir(rest[-1]):

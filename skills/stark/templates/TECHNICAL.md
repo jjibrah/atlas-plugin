@@ -1,14 +1,14 @@
 # {{Project name}} — Technical Blueprint
 
-> **For coding agents and developers.** This is the implementation source of truth. Do not read the discovery material (PRD, transcripts); everything needed is here. Human summary: [OVERVIEW.md](OVERVIEW.md). Modules and rigour: [MODULES.md](MODULES.md).
+> **For coding agents and developers.** This is the implementation source of truth. Do not read the discovery material (PRD, transcripts); everything needed is here. Modules and rigour: [MODULES.md](MODULES.md).
 
 | | |
 |---|---|
 | Version | {{v1.0 — YYYY-MM-DD}} |
 | Size class | {{Small / Medium / Large}} (score {{N}}/18) |
 | System type | {{Greenfield / Brownfield — one line on what already exists}} |
-| Sources | {{PRD v?; extra design sources, if any — `_work/sources/INDEX.md`}} |
-| Requirements | {{N}} (`REQ-001`–`REQ-NNN`, each citing its `FR-…`) · Acceptance criteria: {{N}} · Open questions: {{N}} ({{N}} blocking) · Assumptions: {{N}} |
+| Sources | {{PRD v? / adopted PRD `design/sources/<file>`; extra design sources, if any}} |
+| Counts | {{N}} requirements · {{N}} acceptance criteria · {{N}} open questions ({{N}} blocking) · {{N}} assumptions |
 
 ## How to load this blueprint
 
@@ -18,17 +18,17 @@
 | Implement module Mx | the above + {{`technical/mNN-<name>.md` / §6.x}} — and its rigour in [MODULES.md](MODULES.md) |
 | Pick the next piece of work | [../plan/PLAN.md](../plan/PLAN.md) |
 | Check a decision or an open question | {{[DECISIONS.md](DECISIONS.md) / §11}} |
-| Trace a requirement to its source | `_work/traceability.md` (FR → REQ → AC → WP) |
+| Trace a requirement | §12 |
 
 <!-- TEMPLATE NOTE — delete before finishing.
-Choose the layout BEFORE writing (sizing-rubric.md → "Choose the file layout before writing").
-Single file: everything here; Small systems keep §11; Medium/Large replace §11 with a one-line pointer to DECISIONS.md.
+Choose the layout BEFORE writing (references/write.md §1).
+Single file: everything here; Medium replaces §11 with a one-line pointer to DECISIONS.md.
 Core + module files: §6 keeps only the module index table; each module's detail goes to technical/mNN-<name>.md;
 §9 keeps a short summary and points to technical/x-cross-cutting.md; §5 keeps only state machines that span modules.
-ONLY a module's own heading may name its module ID (`### 6.1 M1 Identity`). Gate G2 finds a module's spec by the first
-heading containing "M1" — so entity, state-machine and flow headings must not contain module IDs (write "Owner: M1" in
-the text below the heading instead). Never put REQ IDs in a row whose first cell is a module ID.
-There is no build plan here — Jarvis writes it in plan/PLAN.md.
+ONLY a module's own heading may name its module ID (`### 6.1 M1 Identity`): gate G2 finds a module's spec by the first
+heading containing "M1", so entity, state-machine and flow headings carry no module ID (write "Owner: M1" below the
+heading). Never put REQ IDs in a row whose first cell is a module ID.
+No work-package table here — the plan is plan/PLAN.md.
 Drop any section that does not apply with one line: "None — <reason>." -->
 
 ---
@@ -49,7 +49,7 @@ Drop any section that does not apply with one line: "None — <reason>." -->
 - API style: {{REST JSON / …}}; error format: {{`{ "error": { "code", "message", "details" } }`}}; status codes: {{401 / 403 / 404 / 409 / 422}}
 - Dates and money: {{UTC ISO-8601; money as integer minor units + currency code}}
 - Testing: {{unit + integration; every acceptance criterion (AC-###) has a test named after it; commands}}
-- Branches and commits: put the work package ID first — branch `WP-07-short-title`, commit `WP-07: …` (Atlas tracks progress from these)
+- Branches and commits: put the work package ID first — branch `WP-07-short-title`, commit `WP-07: …`, and "closes WP-07" in the commit that finishes it (Atlas infers progress from these)
 - Environments & configuration: {{dev / staging / production; environment variables an implementer must know — never their values}}
 
 ## 2. Platforms & architecture
@@ -124,9 +124,10 @@ Invalid transitions return {{409 INVALID_TRANSITION}}. Timed transitions: {{job 
 |---|---|---|---|---|---|---|
 | M1 | {{Identity & roles}} | {{Critical}} | {{…}} | {{User, Role}} | — | {{§6.1 / technical/m01-identity.md}} |
 
-<!-- TEMPLATE NOTE — delete before finishing. Depth per module follows its rigour (rigour.md):
+<!-- TEMPLATE NOTE — delete before finishing. Depth per module follows its rigour:
 Light → purpose, use cases, acceptance criteria. Standard → + entities, business rules, API, state machines where states exist.
-Critical → + errors & edge cases, failure & rollback, threat notes, audit trail. Delete the blocks a level does not need. -->
+Critical → + errors & edge cases, failure & rollback, threat notes, audit trail. Delete the blocks a level does not need.
+The Depends on column feeds the plan seed: list module IDs only. -->
 
 ### 6.1 M1 {{Module name}}
 
@@ -174,7 +175,7 @@ Critical → + errors & edge cases, failure & rollback, threat notes, audit trai
 **Acceptance criteria**
 | AC | REQ | Given / when / then |
 |---|---|---|
-| AC-001 | REQ-… | Given …, when …, then … |
+| AC-NEW | {{REQ-…}} | {{Given …, when …, then …}} |
 
 ## 7. Key cross-module flows
 ### 7.1 {{Flow name}}
@@ -201,15 +202,15 @@ sequenceDiagram
 ### 9.8 Acceptance criteria (cross-cutting)
 | AC | REQ | Given / when / then |
 |---|---|---|
-| AC-0NN | REQ-… | Given …, when …, then … |
+| AC-NEW | {{REQ-…}} | {{Given …, when …, then …}} |
 
 ## 10. Build order
 
-Module dependencies — what must exist before what. Phases and work packages: [../plan/PLAN.md](../plan/PLAN.md) (Jarvis).
+Module dependencies — what must exist before what (an arrow means "before"; labels start with the module ID). Phases and work packages: [../plan/PLAN.md](../plan/PLAN.md).
 
 ```mermaid
 flowchart TD
-    %% {{module dependency graph}}
+    %% {{m1["M1 Identity"] --> m2["M2 Orders"]}}
 ```
 
 ## 11. Decisions, assumptions & open questions
@@ -217,16 +218,16 @@ flowchart TD
 ### 11.1 Assumptions
 | ID | Assumption | Affects | Confirm with |
 |---|---|---|---|
-| ASM-T1 | | | |
+| ASM-T1 | {{…}} | {{…}} | {{…}} |
 
 ### 11.2 Open questions
 | ID | Question | Affects | Blocking | Recommended default | Owner | Status |
 |---|---|---|---|---|---|---|
-| OQ-1 | | | {{yes / no}} | | {{Team / Client via Alice Q-###}} | open |
+| OQ-1 | {{…}} | {{…}} | {{yes / no}} | {{…}} | {{Team / Client via Alice}} | {{open / asked (N-##) / answered}} |
 
 ## 12. Traceability
 
-Per-requirement table (FR → REQ → spec → AC → WP): `_work/traceability.md`. Both it and the summary below are generated by `register.py trace` — do not edit them by hand.
+Per-requirement table (source → REQ → spec → AC → WP): `_work/traceability.md`. It and the summary below are generated by `register.py trace` — do not edit them by hand.
 
 <!-- trace-summary:start -->
 <!-- trace-summary:end -->

@@ -1,29 +1,28 @@
-# Parallel rounds and agent briefs
+# Briefs and parallel rounds
 
-Read this only for `/jarvis brief …` or when proposing parallel rounds in `/jarvis plan next`. Briefs are written to `<P>/plan/briefs/` and published to the code repository with the rest of the plan by `atlasctl publish`.
+For `/jarvis brief <phase, round or WPs>`, and when proposing parallel rounds in `/jarvis plan next`. A brief is the complete instruction for one round of work; it points to the blueprint rather than repeating it. Written to `<P>/plan/briefs/<phase>-<round>.md` from `templates/brief.md`, and published to the code repository with the rest of the plan.
 
-## 1. Lanes and rounds
+## Lanes and rounds
 
-Two work packages can run at the same time when neither depends on the other **and** they touch different files. A group of such packages is a **round**; each agent's share is a **lane**.
+Two work packages can run at the same time when neither depends on the other **and** they touch different files. Such a group is a **round**; each agent's share is a **lane**.
 
-- Lanes in one round own **disjoint files**. If two lanes need the same file, either order them or give the file to one lane and have the other hand over its change.
-- Shared resources are assigned up front: migration numbers, shared config, lock files, a shared test database.
-- Cap the number of parallel lanes at what the project can absorb (default 2–3; ask the user if the project rules do not say). More lanes mean more merge work, not more speed.
-- One orchestrator owns sequencing, merging, the full test run, and the hand-back.
+- Lanes own disjoint files. If two need the same file, order them, or give the file to one lane.
+- Assign shared resources up front: migration numbers, shared config, lock files, the test database.
+- Cap the lanes at what the project can absorb (2–3 unless the user or the project rules say otherwise).
+- One orchestrator owns sequencing, merging, the full test run and the hand-back.
 
-## 2. Writing a brief
+## Before writing
 
-A brief is the complete instruction for one round of work. It **points** to the blueprint rather than repeating it. Use `templates/brief.md`. Before writing:
+1. Read the code repository's `CLAUDE.md` / `AGENTS.md` (read-only) and copy their binding rules into *Standing rules*. Invent none; never write those files.
+2. `atlas pack jarvis` → the *Real progress* line: every dependency of the round must be done. If the packages have no detail block yet, write those first (`references/replan.md`).
+3. Open the files each lane will touch and list them under *Owns* — real paths, inside the module's Paths. State the base branch or commit and each lane's branch `WP-##-short-title`.
+4. Record the test baseline (what fails before the work starts) so new failures are attributable.
+5. Check the lanes for file overlap before writing, not after.
 
-1. Read the code repository's `CLAUDE.md` / `AGENTS.md` (read-only) and copy its binding rules into *Standing rules* (test commands, formatting, spend or safety limits, shared-environment rules, commit conventions). Invent none. Never write those files — `atlasctl publish` maintains the blueprint pointer in them.
-2. Confirm with `atlasctl status --json` that every work package in the round has its dependencies done.
-3. For an existing codebase, open the files each lane will touch and list them under *Owns* — real paths, checked to exist, inside the module's MODULES.md Paths. State the base branch or commit, and each lane's branch `WP-##-short-title`.
-4. Record the test baseline (which tests fail before the work starts) so new failures are attributable.
-5. Check lanes for file overlap. Fix the split before writing, not after.
-6. If the work packages in the round have no detail block yet, write those first (`/jarvis plan next`).
+## In every brief
 
-Every brief ends with a hand-back: what changed, test results against the baseline, decisions needed, anything deferred. Agents do **not** edit PLAN.md or `docs/blueprint/`; Atlas picks progress up from the branches and commits, and the user runs `/atlas`.
+- **Progress conventions** (keep the template's paragraph): branches and pull requests named `WP-##-short-title`, commits starting `WP-##:`; a package is done when its branch or pull request is merged, or a commit on the default branch says "WP-07 done" / "closes WP-07". Agents never edit PLAN.md or `docs/blueprint/`.
+- Critical-module lanes list their review checkpoint among the acceptance items.
+- A hand-back: what changed, test results against the baseline, decisions needed, anything deferred.
 
-Critical-module lanes include their review checkpoint in the acceptance list.
-
-Save it as `<P>/plan/briefs/<phase>-<round>.md`.
+Then `python3 <skill>/scripts/verify.py <P>/plan`.

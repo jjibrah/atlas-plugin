@@ -1,7 +1,7 @@
 # Security review — {{M#}} {{module name}} — {{YYYY-MM-DD}}
 
 Phase: {{P#}} · Rigour: Critical · Reviewer: Spartan (read-only) · Repos: {{name @ short sha}}
-Scope: changes to {{module Paths}} since {{last review date | first review}} — {{N}} commits, {{N}} files.
+Scope: changes to {{module Paths}} since {{last review date | first review}} — {{N}} commits, {{N}} files, {{N}} changed lines{{; reviewed in N parts by sub-folder: …}}.
 
 ## Summary
 {{One or two sentences: overall verdict, number of findings by severity, whether anything blocks release.}}

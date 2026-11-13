@@ -1,8 +1,11 @@
 # {{Project name}} — Requirements Audit
 
-> How much of the requirements (the register in `design/_work/requirements.md`) the current code really implements. Evidence for every requirement is in `audit/<module>.md`. The work needed to close the gaps is in [PLAN.md](PLAN.md). Read-only: the audit never changes code.
+> How much of the requirements (the register in `design/_work/requirements.md`) the current code really implements. Evidence for every requirement is in `audit/<module>.md`. The work needed to close the gaps is in [PLAN.md](PLAN.md), which also lists what is already built. Read-only: the audit never changes code.
 
-**Audited:** {{YYYY-MM-DD}} · **Repository:** {{name}} · **Code at:** {{branch @ commit}} · **Tests:** {{N passed / N failed / could not run}}
+| | |
+|---|---|
+| Version | {{v1.0 — YYYY-MM-DD}} |
+| Code audited | {{repository}} · {{branch @ commit}} · tests: {{N passed / N failed / could not run}} |
 
 ## 1. Summary
 
@@ -58,6 +61,6 @@ Complete % counts done as 1 and partial as ½. Evidence: [audit/](audit/).
 | {{…}} | {{the user / the client via Alice}} | |
 
 ## Changelog
-| Date | Change |
-|---|---|
-| {{YYYY-MM-DD}} | First audit |
+| Version | Date | Change |
+|---|---|---|
+| v1.0 | {{YYYY-MM-DD}} | First audit |

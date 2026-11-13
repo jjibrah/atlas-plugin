@@ -1,13 +1,16 @@
 # {{Project name}} — Progress update
 
-**For:** {{Client}} · **From:** {{author}} · **Date:** {{YYYY-MM-DD}} · **Covers:** {{since the last update on YYYY-MM-DD / since we started}}
+| For | {{Client}} |
+|---|---|
+| From | {{author}} |
+| Version | {{v1.0 — YYYY-MM-DD}} |
+| Covers | {{since the last update on YYYY-MM-DD / since we started}} |
 
 <!-- TEMPLATE NOTE — delete before finishing. For the client's owner or manager: one or two pages, plain words, their
 vocabulary (the proposal's words, not ours). No internal IDs (no WP-, REQ-, AC-, FR-, M1, P1, CR-, G-numbers), no
 source tags, no technical terms, no talk of our process (commits, pull requests, tests, gates, work packages).
-Say "done" only for work whose confidence is verified or likely — never for claimed-only work; claimed work is
-"in progress". Phases are "Phase 1", "Phase 2", named by what the client gets. Every sentence must be backed by
-handover-data, the PRD or the proposal — nothing invented. -->
+Say "done" only for work the progress pack lists as done. Phases are "Phase 1", "Phase 2", named by what the client
+gets. Every sentence must be backed by the progress pack, the PRD or the proposal — nothing invented. -->
 
 ## In short
 

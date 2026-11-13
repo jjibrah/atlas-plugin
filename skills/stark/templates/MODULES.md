@@ -1,6 +1,6 @@
 # {{Project name}} — Modules
 
-> Read by `atlasctl` (CONTRACT §3). One row per module. **Rigour** is Stark's proposal (rigour.md); the user confirms each with `atlasctl rigour M# <Light|Standard|Critical> --reason "…"`, and the confirmed level wins. **Paths** are comma-separated globs relative to the code repository root (`**` allowed), or `?` until known — Atlas maps commits to modules with them. Do not put REQ/FR/WP IDs in this table.
+> Read by Atlas. One row per module. **Rigour** is Stark's proposal; the user confirms all at once with `atlas rigour --accept [M2=Critical …]`, and the confirmed level wins. **Paths** are comma-separated globs relative to the code repository root (`**` allowed), or `?` until known — Atlas maps commits to modules with them. No REQ / FR / AC / WP IDs in this table.
 
 | Module | Name | Rigour | Paths | Signals | Reason |
 |---|---|---|---|---|---|

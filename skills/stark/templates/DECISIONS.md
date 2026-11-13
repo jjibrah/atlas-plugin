@@ -1,16 +1,19 @@
 # {{Project name}} — Technical Decisions & Open Questions
 
-> What has been decided, what was assumed, and what still needs an answer — for the design. Referenced from the spec as `AD-#`, `ASM-T#`, `OQ-#`. Client-facing questions are not asked here: they go through Alice into `../discovery/QUESTIONS.md` (`Q-###`), and the OQ row names that Q.
+> What has been decided, what was assumed, and what still needs an answer — for the design. Referenced from the spec as `AD-#`, `ASM-T#`, `OQ-#`. Questions only the client can answer are sent to Alice as a note; the OQ row then says `asked (N-##)`.
 
-**Updated:** {{YYYY-MM-DD}} · Open questions: {{N}} ({{N}} blocking) · Assumptions awaiting confirmation: {{N}}
+| | |
+|---|---|
+| Version | {{v1.0 — YYYY-MM-DD}} |
+| Open | {{N}} questions ({{N}} blocking) · {{N}} assumptions awaiting confirmation |
 
 ## 1. Open questions
 
-Blocking = a wrong guess would force rework of the data model, a state machine, an integration or the architecture. Gate G2 does not pass while a blocking question is open. Status: `open` · `asked (Q-###)` · `answered` · `resolved`. Answered questions stay in this table (IDs are permanent): set the Status, add the answer and the date to the Question cell, and update every place that relied on the default.
+Blocking = a wrong guess would force rework of the data model, a state machine, an integration or the architecture. Gate G2 does not pass while a blocking question is open. Status: `open` · `asked (N-##)` · `answered` · `resolved`. Answered questions stay in this table (IDs are permanent): set the Status, add the answer and the date to the Question cell, and update every place that relied on the default.
 
 | ID | Question | Affects | Blocking | Recommended default | Owner | Status |
 |---|---|---|---|---|---|---|
-| OQ-1 | {{…}} | {{modules / REQs}} | {{yes}} | {{…}} | {{Client via Alice Q-0NN / Team}} | {{open}} |
+| OQ-1 | {{…}} | {{modules / REQs}} | {{yes}} | {{…}} | {{Client via Alice / Team}} | {{open}} |
 
 ## 2. Assumptions
 

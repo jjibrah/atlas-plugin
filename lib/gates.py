@@ -154,6 +154,12 @@ def g1(p: A.Project, answers: Dict[str, str]) -> List[Dict[str, Any]]:
     sc = scope_flags(p)
     prd = md.strip_noise(A.doc_text(p, "discovery/PRD.md"))
     s15 = section(prd, "15")
+    if "regulat" not in s15.lower()[:400]:            # the short PRD template numbers its sections differently
+        m = re.search(r"^#{2,3} [\d.]*\s*Regulations.*$", prd, flags=re.M | re.I)
+        if m:
+            rest = prd[m.end():]
+            end = re.search(r"^#{2,3} ", rest, flags=re.M)
+            s15 = rest[: end.start()] if end else rest
     if sc["S"]:
         rows = [ln for ln in s15.splitlines() if ln.strip().startswith("|") and not md.is_sep(ln)]
         filled = len(rows) > 1 or "none identified" in s15.lower()
@@ -231,9 +237,15 @@ def g3(p: A.Project, answers: Dict[str, str]) -> List[Dict[str, Any]]:
     covered = set()
     for w in wps:
         covered |= set(w["reqs"])
+    # Requirements the audit found already built are listed in PLAN.md in a table `| REQ | Evidence |`
+    for t in md.read_tables(p.path / "plan" / "PLAN.md"):
+        if t.col("req") == 0 and t.col("evidence") is not None:
+            for r in t.rows:
+                covered |= set(md.expand_ranges(r[0]))
     live = [r for r, v in rq.items() if not any(s in v["status"] for s in ("out of scope", "deferred", "rejected", "removed"))]
     miss = [r for r in live if r not in covered]
-    out.append(R("coverage", "Every REQ is covered by a work package", not miss, short(miss)))
+    out.append(R("coverage", "Every REQ is covered by a work package (or listed as already built)", not miss,
+                 short(miss)))
     graph = {w["id"]: w["depends"] for w in wps}
     cycle = find_cycle(graph)
     out.append(R("cycles", "No dependency cycles between work packages", not cycle, " → ".join(cycle)))
