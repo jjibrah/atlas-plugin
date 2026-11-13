@@ -169,7 +169,7 @@
     b.className = "copy-btn"; b.type = "button"; b.textContent = "Copy";
     b.setAttribute("aria-label", "Copy the commands");
     b.addEventListener("click", function () {
-      var text = pre.querySelector("code").innerText.replace(/\s+#.*$/gm, "");
+      var text = pre.querySelector("code").innerText.replace(/\s+#.*$/gm, "").replace(/\\\n\s*/g, "");
       var done = function (ok) { b.textContent = ok ? "Copied" : "Select and copy"; setTimeout(function () { b.textContent = "Copy"; }, 1600); };
       if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
       else done(false);
