@@ -1,9 +1,9 @@
 # Go-live checklist — {{Project name}} — {{P1}}
 
-<!-- SENTINEL. Every item is a "- [ ]" checkbox; Spartan's G5 counts unchecked ones. Tick "- [x]" only when the
-     user confirms it is done. Scale to size: Small → keep only what applies (often 8–12 items). Remove sections that
-     truly do not apply (say why in one line). "Rollback" is required when a Critical module is in the phase.
-     Never write secrets, passwords or keys here — only WHERE they are configured. -->
+<!-- SENTINEL. Every item is a "- [ ]" checkbox; gate G5 counts the unchecked ones. Tick "- [x]" only when the
+     user confirms it is done. Scale to the project: Small → only what applies (8–12 items); Medium → drop what
+     cannot apply and say why in one line; Large → everything, with an owner per section. "Rollback" is required
+     when a Critical module is in the phase. Never write secrets, passwords or keys here — only WHERE they are set. -->
 
 Owner: {{name/role}} · Planned go-live: {{date and time}} · Release: {{version / tag}}
 

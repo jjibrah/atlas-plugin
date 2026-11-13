@@ -3,7 +3,10 @@
 
   register.py init   <D>             create _work/requirements.md and _work/STATE.md (leaves existing files alone)
   register.py prd    <D>             summarise the PRD's FR / BR rows: in scope, to confirm, skipped, not yet cited
-  register.py seed   <D>             add one NEW row per in-scope FR and BR that no REQ cites yet, then number them
+                                     (adopted PRD without FR rows: lists the chunks to extract from instead)
+  register.py seed   <D>             add one row per in-scope FR and BR that no REQ cites yet, and number them.
+                                     Adopted PRD (no FR rows): propose candidate rows from the converted chunks,
+                                     ID = NEW, Source = [d1-004] — NOT numbered until the user has confirmed them
   register.py number <D>             give every row whose ID is NEW a final REQ-### (never renumbers)
   register.py assign <D> <file>      fill the Module column from a map file with lines like  M1: REQ-001-REQ-012, REQ-040
   register.py merge  <D>             append rows from _work/extract/*.md (parallel extraction) and number them
@@ -19,6 +22,11 @@
 
 Layout: <P>/discovery/PRD.md (Alice, read-only) · <D>/_work/requirements.md · <D>/TECHNICAL.md · <D>/technical/*.md
         · <D>/MODULES.md · <P>/plan/PLAN.md, AUDIT.md, audit/*.md (Jarvis, read-only here).
+
+Two source modes. Normal: discovery/PRD.md has FR-### rows and every REQ cites its FR/BR (the FR → REQ chain).
+Adopted: there are no FR rows (project created with `atlas new --prd`); the PRD is a converted file under
+<D>/_work/sources and every REQ cites the chunk it came from, e.g. [d1-004]. The ledger then checks that every
+chunk produced requirements or has a recorded reason.
 """
 from __future__ import annotations
 
@@ -48,8 +56,9 @@ FR_SKIP = ("out of scope", "rejected", "deferred")
 DEAD = ("out of scope", "rejected", "deferred", "removed")
 SKELETON = """# Requirements Register — {{Project name}}
 
-Primary source: `../discovery/PRD.md` (Alice) · Extra design sources: `_work/sources/INDEX.md` (if any)
-Size class: (set in the sizing step)
+Primary source: `../discovery/PRD.md` (Alice), or — adopted PRD — the chunks in `_work/sources/INDEX.md`
+Extra design sources: `_work/sources/INDEX.md` (if any)
+Size class: (from the brief; re-scored in the extract step)
 System type: (greenfield / brownfield)
 
 ## Document roles & precedence
@@ -94,32 +103,24 @@ Module list, rigour and code paths: `../MODULES.md`. Purpose, owned entities and
 
 STATE_SKELETON = """# STARK run state
 
-Update after every step: tick it, add the date, and note the facts later steps need.
+Tick each step with the date and note the facts later steps need. A resumed run starts at the first unticked step.
 
 | | |
 |---|---|
 | Mode | build |
-| PRD version | |
-| System type | |
-| Code repo (read-only) | |
+| Track | (small / standard — from `atlas begin stark`) |
+| PRD | (version, or "adopted: design/sources/<file>") |
+| System type | (greenfield / brownfield + repo path) |
 | Size class | |
 | Layout | (single file / core + module files) |
-| Modules | |
 
 ## Steps
-- [ ] 0 Setup
-- [ ] 1 Intake (PRD + extra design sources)
-- [ ] 2 Extract
-- [ ] 3 Size
-- [ ] 4 Map the codebase (existing code only)
-- [ ] 5 Model + modules + rigour proposal
-- [ ] 6 Checkpoint with the user
-- [ ] 7 Architecture & quality
-- [ ] 8 Technical spec
-- [ ] 9 Review
-- [ ] 10 Overview
-- [ ] 11 Verify
-- [ ] 12 Hand off (rigour confirmation, events)
+- [ ] Extract (register numbered; `verify.py --stage extract` passes)
+- [ ] Model (modules assigned, MODULES.md with proposed rigour; `register.py lint --strict` passes)
+- [ ] Checkpoint (questions answered or defaulted; rigour confirmed if the user answered)
+- [ ] Write (TECHNICAL.md and module files; `verify.py --stage spec` passes)
+- [ ] Review (standard track) / Plan — PLAN.md written (small track)
+- [ ] Finish (`register.py trace`, rigour confirmed, `atlas finish stark`)
 
 ## Notes for later steps
 """
@@ -293,10 +294,37 @@ def in_scope(item):
     return not any(w in item["status"] for w in FR_SKIP)
 
 
+NO_SOURCE = ("No FR-### rows in %s and no converted PRD under %s.\n"
+             "Either run /alice first, or — for a PRD the client supplied — put the file in <P>/design/sources/ "
+             "(`atlas intake <file> --to design`) and convert it:\n"
+             "  python3 <plugin>/lib/convert_docs.py <P>/design/sources <P>/design/_work/sources")
+
+
+def adopted(d):
+    """True when the PRD has no FR/BR rows and converted source chunks exist: REQs cite chunk IDs instead of FRs."""
+    return not prd_items(d) and bool(live_chunks(d))
+
+
+def no_source(d):
+    return NO_SOURCE % (os.path.relpath(prd_path(d), project_dir(d)), os.path.join("design", "_work", "sources"))
+
+
 def cmd_prd(d):
     items = prd_items(d)
     if not items:
-        sys.exit("No FR-### rows found in %s — Alice's PRD is the primary source; run /alice first." % prd_path(d))
+        chunks = live_chunks(d)
+        if not chunks:
+            sys.exit(no_source(d))
+        _, rows = load(d) if os.path.exists(register_path(d)) else ([], [])
+        cited = collections.Counter(c for r in rows if not r["_removed"] for c in set(CHUNK_RE.findall(r["Source"])))
+        print("Adopted PRD: no FR-### rows — requirements are extracted from the chunks and cite them, e.g. [%s]."
+              % next(iter(chunks)))
+        for cid, c in chunks.items():
+            print("  %s  %-40s %5d words  %d row(s)  %s" % (cid, str(c.get("title", ""))[:40], c.get("words", 0),
+                                                           cited.get(cid, 0), c.get("file", "")))
+        print("Next: `register.py seed` proposes candidate rows (ID = NEW); correct them against each chunk, confirm "
+              "the list with the user in one batch, then `register.py number`.")
+        return
     _, rows = load(d) if os.path.exists(register_path(d)) else ([], [])
     cited = collections.defaultdict(list)
     for r in active(rows):
@@ -314,10 +342,82 @@ def cmd_prd(d):
     print("In scope, not yet cited by any REQ: %s" % (", ".join(todo) or "none"))
 
 
+MODAL_RE = re.compile(r"(?i)\b(must|shall|should|can|cannot|may not|will|needs? to|has to|have to|is able to|"
+                      r"are able to|be able to|required|requires?|only)\b")
+
+
+def chunk_candidates(d, cid, chunk):
+    """Candidate requirement sentences from one converted chunk: list items, and sentences with a modal verb.
+    A first pass only — Stark reads the chunk and corrects the rows before the user confirms them."""
+    code = cid.split("-")[0]
+    path = os.path.join(d, "_work", "sources", code, cid + ".md")
+    if not os.path.exists(path):
+        return []
+    text = md.strip_noise("\n".join(read_lines(path)))
+    out, para = [], []
+
+    def flush():
+        if para:
+            for sent in re.split(r"(?<=[.;!?])\s+", " ".join(para)):
+                if MODAL_RE.search(sent):
+                    out.append(sent)
+            del para[:]
+    for line in text.split("\n"):
+        st = line.strip()
+        m = re.match(r"^(?:[-*+•]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.*)", st)
+        if m:
+            flush()
+            out.append(m.group(1))
+        elif not st or st.startswith(("#", "|", ">", "!")):
+            flush()
+        else:
+            para.append(st)
+    flush()
+    clean = []
+    for c in out:
+        c = re.sub(r"[*_`]+", "", c).replace("|", "/").strip(" .;")
+        if len(c.split()) >= 4 and len(c) <= 420:
+            clean.append(c + ".")
+    return clean
+
+
+def seed_from_chunks(d):
+    chunks = live_chunks(d)
+    if not chunks:
+        sys.exit(no_source(d))
+    lines, rows = load(d)
+    tables = list(req_tables(lines))
+    if not tables:
+        sys.exit("The register has no requirements table (header starting with '| ID |').")
+    header, trows, hline = tables[0]
+    names = [h.strip().lower() for h in header]
+    insert_at = (trows[-1][0] if trows else hline + 1) + 1
+    have = {c for r in rows for c in CHUNK_RE.findall(r["Source"])}
+    seen = {re.sub(r"[^a-z0-9]+", " ", r["Requirement"].lower()).strip() for r in rows}
+    new, used = [], 0
+    for cid, c in chunks.items():
+        if cid in have:
+            continue
+        cands = [x for x in chunk_candidates(d, cid, c)
+                 if re.sub(r"[^a-z0-9]+", " ", x.lower()).strip() not in seen]
+        used += 1 if cands else 0
+        for text in cands:
+            seen.add(re.sub(r"[^a-z0-9]+", " ", text.lower()).strip())
+            vals = {"id": "NEW", "cat": "FUNC", "type": "stated", "requirement": text, "source": "[%s]" % cid,
+                    "priority": "", "module": "", "status": ""}
+            new.append("| " + " | ".join(vals.get(n, "") for n in names) + " |")
+    lines[insert_at:insert_at] = new
+    with open(register_path(d), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print("Adopted PRD: proposed %d candidate row(s) from %d chunk(s), ID = NEW (not numbered)." % (len(new), used))
+    print("Next: read each chunk; correct, split and delete rows, add what was missed, set Cat and Priority; show the "
+          "user the list and get it confirmed in one batch; only then run: register.py number")
+
+
 def cmd_seed(d):
     items = prd_items(d)
     if not items:
-        sys.exit("No FR-### rows found in %s." % prd_path(d))
+        return seed_from_chunks(d)
     lines, rows = load(d)
     cited = {u for r in active(rows) for u in upstream(r)}
     tables = list(req_tables(lines))
@@ -547,21 +647,29 @@ def lint(d, strict=False):
 
     # --- the FR → REQ chain (Alice's PRD is the primary source)
     items = prd_items(d)
-    if not items:
-        fails.append("No FR-### rows found in %s — the PRD is the primary source." % os.path.relpath(prd_path(d), project_dir(d)))
     chunks = live_chunks(d)
+    is_adopted = not items and bool(chunks)
+    if not items and not chunks:
+        fails.append(no_source(d))
     no_up = []
     for r in act:
         if not r["Source"]:
             continue
         ups = upstream(r)
-        if r["Cat"].upper() in FUNCTIONAL and not ups and not is_derived(r):
+        if is_adopted:
+            # no FR chain: the chunk the requirement came from is its upstream ID
+            if not is_derived(r) and not CHUNK_RE.search(r["Source"]):
+                no_up.append(r["ID"])
+        elif r["Cat"].upper() in FUNCTIONAL and not ups and not is_derived(r):
             no_up.append(r["ID"])
         elif not ups and not is_derived(r) and not PRD_SECTION_RE.search(r["Source"]) and not CHUNK_RE.search(r["Source"]):
             no_up.append(r["ID"])
         if is_derived(r) and not REQ_RE.search(r["Source"]):
             fails.append("%s is derived but its Source does not name the REQ it is derived from." % r["ID"])
-    if no_up:
+    if no_up and is_adopted:
+        fails.append("%d requirement(s) do not cite the source chunk they came from, e.g. `[d1-004]` (adopted PRD: "
+                     "there are no FR rows, so the chunk ID is the upstream ID): %s" % (len(no_up), ", ".join(no_up[:25])))
+    elif no_up:
         fails.append("%d requirement(s) do not cite their upstream FR-/BR- ID (non-functional rows may cite `PRD §14` / "
                      "`PRD §15` or a design-source chunk instead): %s" % (len(no_up), ", ".join(no_up[:25])))
     if items:
@@ -624,7 +732,9 @@ def lint(d, strict=False):
         warns.append("%d requirement(s) are very long — probably not atomic: %s" % (len(long_rows), ", ".join(long_rows[:12])))
     text = "\n".join(lines)
     stats = [
-        "Requirements: %d active (%d live), %d removed/duplicate." % (len(act), len(live(rows)), len([r for r in rows if r["_removed"]])),
+        "Requirements: %d active (%d live), %d removed/duplicate.%s" % (
+            len(act), len(live(rows)), len([r for r in rows if r["_removed"]]),
+            " Adopted PRD: no FR rows, sources are chunks." if is_adopted else ""),
         counter_table("By category", collections.Counter(r["Cat"].upper() for r in act)),
         counter_table("By module", collections.Counter(r["Module"] for r in act)),
     ]
@@ -698,8 +808,13 @@ def ledger(d, write=True):
     if os.path.exists(path):
         for line in read_lines(path):
             cells = split_row(line)
-            if len(cells) >= 5 and re.fullmatch(r"d\d+-\d{3}", cells[0]) and cells[3].lower() == "none" and len(cells[4]) > 2:
-                reasons[cells[0]] = cells[4]
+            if len(cells) < 5 or not re.fullmatch(r"d\d+-\d{3}", cells[0]):
+                continue
+            # | Chunk | Section | Words | REQs | Status | Reason |  — Status `none` followed by a reason
+            for i in range(3, len(cells) - 1):
+                if cells[i].lower() == "none" and len(cells[i + 1]) > 2:
+                    reasons[cells[0]] = cells[i + 1]
+                    break
     todo, thin, out = [], [], []
     for cid, c in chunks.items():
         n = counts.get(cid, 0)
@@ -833,6 +948,19 @@ def plan_table_map(plan_text):
     return out
 
 
+def built_map(plan_text):
+    """REQ → evidence, from PLAN.md's optional `| REQ | Evidence |` table (requirements the audit found built)."""
+    out = {}
+    for t in md.tables(plan_text):
+        if t.col("req") != 0 or t.col("evidence") is None:
+            continue
+        ce = t.col("evidence")
+        for r in t.rows:
+            for rid in expand_ranges(r[0] if r else ""):
+                out[rid] = r[ce].strip() if ce < len(r) else ""
+    return out
+
+
 def plan_text(d):
     path = os.path.join(plan_dir(d), "PLAN.md")
     return "\n".join(read_lines(path)) if os.path.exists(path) else ""
@@ -867,7 +995,7 @@ def cmd_trace(d, out_path=None, summary=True):
     for ac, reqs, _ in ac_rows(d):
         for r in reqs:
             acs[r].append(ac)
-    plan, audit = plan_table_map(plan_text(d)), audit_map(d)
+    plan, audit, built = plan_table_map(plan_text(d)), audit_map(d), built_map(plan_text(d))
     act = active(rows)
     # First column is a plain counter so `atlasctl impact` does not treat these generated rows as definitions.
     head = ["#", "REQ", "Upstream", "Requirement", "Specified in", "ACs", "Planned in"] + (["Audit"] if audit else [])
@@ -877,7 +1005,8 @@ def cmd_trace(d, out_path=None, summary=True):
         text = r["Requirement"] if len(r["Requirement"]) <= 100 else r["Requirement"][:97] + "…"
         ups = ", ".join(upstream(r)) or r["Source"]
         cells = [str(i), r["ID"], ups, text, "; ".join(cites.get(r["ID"], [])[:3]) or "—",
-                 ", ".join(acs.get(r["ID"], [])) or "—", ", ".join(plan.get(r["ID"], [])) or "—"]
+                 ", ".join(acs.get(r["ID"], [])) or "—",
+                 ", ".join(plan.get(r["ID"], []) + (["built"] if r["ID"] in built else [])) or "—"]
         if audit:
             cells.append(audit.get(r["ID"], "—"))
         out.append("| " + " | ".join(cells) + " |")
@@ -894,7 +1023,7 @@ def cmd_trace(d, out_path=None, summary=True):
         m["n"] += 1
         m["spec"] += 1 if cites.get(r["ID"]) else 0
         m["ac"] += 1 if acs.get(r["ID"]) else 0
-        m["plan"] += 1 if plan.get(r["ID"]) or status_exempt(r["Status"]) else 0
+        m["plan"] += 1 if plan.get(r["ID"]) or r["ID"] in built or status_exempt(r["Status"]) else 0
         for place in cites.get(r["ID"], [])[:1]:
             m["files"][place.split(" §")[0]] += 1
 

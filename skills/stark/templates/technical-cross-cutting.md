@@ -1,10 +1,10 @@
 # Cross-cutting requirements
 
-> Part of [TECHNICAL.md](../TECHNICAL.md). Non-functional, operational and legal requirements that apply across modules (module `X` in the register). Depth follows the size class and the highest rigour level among the modules it protects.
+> Part of [TECHNICAL.md](../TECHNICAL.md). Non-functional, operational and legal requirements that apply across modules (module `X` in the register). Depth follows the size class and the highest rigour among the modules it protects.
 
 | | |
 |---|---|
-| Requirements | {{REQ-570–REQ-585}} ({{N}}) · upstream {{PRD §14, §15, FR-…}} |
+| Requirements | {{REQ-570–REQ-585}} ({{N}}) · upstream {{PRD §n, FR-…}} |
 | Applies to | {{all modules / list}} |
 
 ## 1. Security & privacy
@@ -36,9 +36,9 @@
 {{imports, cut-over steps, first admin, seed catalogues — or "None — new system with no prior data."}}
 
 ## 8. Compliance & legal
-{{regulations from PRD §15, who is responsible for what, prerequisites before go-live — or "None stated."}}
+{{regulations the PRD names, who is responsible for what, prerequisites before go-live — or "None stated."}}
 
 ## 9. Acceptance criteria
 | AC | REQ | Given / when / then |
 |---|---|---|
-| AC-{{0NN}} | REQ-… | Given …, when …, then … |
+| AC-NEW | {{REQ-…}} | {{Given …, when …, then …}} |

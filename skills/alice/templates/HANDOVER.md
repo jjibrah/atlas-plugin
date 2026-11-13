@@ -2,12 +2,12 @@
 
 <!-- TEMPLATE NOTE — delete before finishing. INTERNAL — never exported. The team's record of what was delivered and
 what remains, with IDs. The client-facing version is HANDOVER-CLIENT.md. Every row cites its evidence: PRD IDs,
-work packages, change requests, sign-off and release events from handover-data. Do not guess: anything not in the
+work packages, change requests, sign-off and release events from `atlas handover-data`. Do not guess: anything not in the
 evidence goes to the user as a question. -->
 
 | | |
 |---|---|
-| Date | {{YYYY-MM-DD}} |
+| Version | {{v1.0 — YYYY-MM-DD}} |
 | PRD | {{v1.2}} · Proposal {{v1.1}} |
 | Phases released | {{P1 (YYYY-MM-DD), P2 (…)}} |
 | Sign-offs | {{PRD v1.0 by Owner, YYYY-MM-DD; …}} |

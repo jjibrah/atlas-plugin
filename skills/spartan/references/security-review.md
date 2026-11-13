@@ -1,6 +1,6 @@
 # Security review checklist (Critical modules)
 
-Read-only review of the changes touching a Critical module's Paths since its last review (`spartan.py changes`). Proportionate: check what the diff touches; skip sections that cannot apply and say so in one line. Every finding needs **path:line evidence** — no evidence, no finding (write it as a question instead).
+Read-only review of the changes touching a Critical module's Paths since its last review (`spartan.py changes`); the intended behaviour comes from `atlas pack spartan --module M#`. Proportionate: check what the diff touches; skip sections that cannot apply and say so in one line. A large change arrives in parts: go through the checklist once per part. Every finding needs **path:line evidence** — no evidence, no finding (write it as a question instead).
 
 Severity:
 - **Blocker** — exploitable now or loses/leaks money or personal data; must be fixed before release.
@@ -50,5 +50,5 @@ Severity:
 ## 9. Audit trail
 - Actions the spec lists as audited (money, permissions, personal-data access, deletes) write who/what/when (+ before/after where specified), and audit records cannot be edited by normal users.
 
-## Report format — `<P>/reports/security-review-<M#>-<YYYY-MM-DD>.md`
-Use `<skill>/templates/security-review.md`.
+## Report
+`P/reports/security-review-<M#>-<YYYY-MM-DD>.md`, from `templates/security-review.md`.

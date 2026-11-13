@@ -3,17 +3,22 @@
 
 Usage: verify.py <design_dir> [--stage extract|spec|all]
 
-  extract  register well-formed; every in-scope PRD FR cited by a REQ; extra design sources accounted for
+  extract  register well-formed; every in-scope PRD FR cited by a REQ (adopted PRD without FR rows: every REQ cites
+           its source chunk and every chunk is accounted for); extra design sources accounted for
   spec     + modules assigned; MODULES.md valid; every REQ specified and given an acceptance criterion (AC-###);
            Critical modules carry threat notes and failure/rollback behaviour; open-question table readable by gate G2;
-           documents complete, consistent and within size budgets
-  all      (default) spec + OVERVIEW.md present and plain-language
+           TECHNICAL.md has its `| Version | v1.0 — YYYY-MM-DD |` header row; documents complete, consistent and
+           within size budgets
+  all      (default) spec + traceability. OVERVIEW.md is optional (written on request): it is checked for plain
+           language when present and required only when the project's size in atlas.json is Large.
 
-These checks mirror what `atlasctl gate G2` reads, so a PASS here means G2 can parse the design.
+`atlas finish stark` runs exactly `verify.py <P>/design`. These checks mirror what gate G2 reads, so a PASS here
+means G2 can parse the design.
 """
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import sys
@@ -29,6 +34,16 @@ MAX_LINE = 1500
 LATER_OUTPUTS = ("PLAN.md", "AUDIT.md")  # Jarvis writes these after the design
 MODULES_HEADER = ["module", "name", "rigour", "paths", "signals", "reason"]
 LEVELS = ("Light", "Standard", "Critical")
+VERSION_RE = re.compile(r"\|\s*\**Version\**\s*\|\s*\**\s*(v\d+(?:\.\d+)*)", flags=re.I)  # what `atlas finish` reads
+
+
+def project_size(root):
+    """Size class Atlas holds for the project (<P>/atlas.json), or '' when the folder is not inside a project."""
+    try:
+        with open(os.path.join(os.path.dirname(root), "atlas.json"), encoding="utf-8") as f:
+            return str(json.load(f).get("size", ""))
+    except (OSError, ValueError):
+        return ""
 
 
 def read(path):
@@ -84,7 +99,7 @@ def check_docs(root, docs, fails, warns):
         if base == "TECHNICAL.md" and os.path.dirname(path) == root and not has_modules:
             budget = SINGLE_FILE_BUDGET_KB
         if budget and size_kb > budget:
-            warns.append("%s is %d KB (budget %d KB) — split it; see sizing-rubric.md → File size budgets." % (name, size_kb, budget))
+            warns.append("%s is %d KB (budget %d KB) — split it; see references/write.md → Layout and budgets." % (name, size_kb, budget))
         longest = max([len(ln) for ln in text.split("\n")] + [0])
         fat = sum(1 for ln in text.split("\n") if ln.lstrip().startswith("|") for c in reg.split_row(ln) if len(c) > MAX_CELL)
         if longest > MAX_LINE or fat:
@@ -118,7 +133,7 @@ def check_spec(root, rows, tech, fails, warns):
         if os.path.basename(os.path.dirname(path)) == "technical" and os.path.basename(path) not in core:
             warns.append("TECHNICAL.md does not link to technical/%s." % os.path.basename(path))
     if re.search(r"^\|\s*WP\s*\|", tech_all, flags=re.M | re.I):
-        warns.append("A work-package table is in the design — the plan belongs to Jarvis in plan/PLAN.md (atlasctl reads only that).")
+        warns.append("A work-package table is in the design — the plan lives in plan/PLAN.md (Atlas reads only that file).")
 
 
 def check_acs(root, rows, fails, warns):
@@ -169,10 +184,10 @@ def check_modules(root, rows, fails, warns):
         if not m["reason"]:
             fails.append("MODULES.md %s: Reason is empty — say why this rigour level." % mid)
         if m["proposed"] == "Critical" and not m["signals"].strip("-— "):
-            warns.append("MODULES.md %s is Critical but lists no signals (rigour.md)." % mid)
+            warns.append("MODULES.md %s is Critical but lists no signals — Critical is earned by a signal." % mid)
         cells = " ".join([m["name"], m["paths"], m["signals"], m["reason"]])
         if re.search(r"\b(REQ|FR|AC|WP)-\d+", cells):
-            warns.append("MODULES.md %s cites REQ/FR/AC/WP IDs — remove them; `atlasctl impact` would treat the whole module as affected." % mid)
+            warns.append("MODULES.md %s cites REQ/FR/AC/WP IDs — remove them; `atlas impact` would treat the whole module as affected." % mid)
     act = reg.active(rows)
     used = {r["Module"] for r in act if r["Module"]}
     empty = [m for m in mods if m not in used]
@@ -182,8 +197,8 @@ def check_modules(root, rows, fails, warns):
     print("Modules: %s" % ", ".join("%s %s (%s%s)" % (k, v["name"], v["rigour"], "" if v["confirmed"] else ", proposed")
                                     for k, v in mods.items()))
     if unconf:
-        warns.append("Rigour not yet confirmed by the user for %s — ask, then `atlasctl rigour <M#> <Level> --reason \"…\"` (gate G2 needs it)."
-                     % ", ".join(unconf))
+        warns.append("Rigour not yet confirmed by the user for %s — show module, proposed level and reason, ask once, "
+                     "then `atlas rigour --accept [M2=Critical …]` (gate G2 needs it)." % ", ".join(unconf))
     return mods
 
 
@@ -217,13 +232,13 @@ def check_depth(root, mods, core, fails, warns):
             miss = [w for w, ok in (("threat notes", "threat" in low or "abuse" in low),
                                     ("failure/rollback behaviour", "rollback" in low or "failure" in low)) if not ok]
             if miss:
-                fails.append("%s %s is Critical but its spec lacks %s (rigour.md; gate G2)." % (mid, m["name"], " and ".join(miss)))
+                fails.append("%s %s is Critical but its spec lacks %s (gate G2 checks this)." % (mid, m["name"], " and ".join(miss)))
             if "audit" not in low:
-                warns.append("%s %s is Critical — rigour.md also asks for an audit trail." % (mid, m["name"]))
+                warns.append("%s %s is Critical — a Critical spec also carries an audit trail." % (mid, m["name"]))
             if "edge" not in low and "error" not in low:
                 warns.append("%s %s is Critical — list every error and edge case." % (mid, m["name"]))
         elif m["rigour"] == "Standard" and "|" not in text:
-            warns.append("%s %s is Standard — add the data model / flows / API contracts (rigour.md)." % (mid, m["name"]))
+            warns.append("%s %s is Standard — add the data model / flows / API contracts." % (mid, m["name"]))
 
 
 def check_questions(root, docs, fails, warns):
@@ -251,8 +266,8 @@ def check_questions(root, docs, fails, warns):
                     n_block += b == "yes"
     print("Open questions: %d open, %d blocking." % (n_open, n_block))
     if n_block:
-        warns.append("%d blocking open question(s) — gate G2 fails on them for Standard/Critical projects. Ask the user "
-                     "(client-only questions go to Alice's QUESTIONS.md)." % n_block)
+        warns.append("%d blocking open question(s) — gate G2 fails on them for Standard/Critical projects. Ask the user; "
+                     "a question only the client can answer: `atlas note --to alice \"…\" --from stark --refs OQ-#`." % n_block)
 
 
 def check_refs(root, docs, fails):
@@ -327,6 +342,9 @@ def main():
         if core is None:
             fails.append("Missing TECHNICAL.md")
         else:
+            if not VERSION_RE.search(core[:3000]):
+                fails.append("TECHNICAL.md has no `| Version | v1.0 — YYYY-MM-DD |` row in its header table — "
+                             "`atlas finish` reads the version from it.")
             check_spec(root, rows, tech, fails, warns)
             check_acs(root, rows, fails, warns)
         mods = check_modules(root, rows, fails, warns)
@@ -339,8 +357,9 @@ def main():
         check_refs(root, docs, fails)
         overview = docs.get(os.path.join(root, "OVERVIEW.md"))
         if stage == "all":
-            if overview is None:
-                fails.append("Missing OVERVIEW.md")
+            if overview is None and project_size(root) == "Large":
+                fails.append("Missing OVERVIEW.md — a Large project gets the plain-language overview "
+                             "(templates/OVERVIEW.md). Smaller projects write it only on request.")
             if not os.path.exists(os.path.join(root, "_work", "traceability.md")):
                 warns.append("No _work/traceability.md — run register.py trace.")
         if overview is not None:

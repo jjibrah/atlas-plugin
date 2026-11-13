@@ -37,6 +37,10 @@ IGNORE_FILES = ["docs/blueprint/**", "*.lock", "package-lock.json", "yarn.lock",
                 "poetry.lock", "Cargo.lock", "go.sum", "*.min.js", "*.map", ".gitignore", "README*", "CHANGELOG*",
                 "AGENTS.md", "CLAUDE.md", ".github/**", ".vscode/**", ".idea/**"]
 LOCK_SECONDS = 600
+FETCH_TTL = 600          # seconds between network scans unless --fresh
+CLOSE_RE = re.compile(r"(?i)\b(close[sd]?|complete[sd]?|finish(?:es|ed)?|done|resolve[sd]?)\b")
+AGENT_STAGE = {"alice": "define", "stark": "design", "jarvis": "plan", "sentinel": "test"}
+STAGE_GATE = {"define": "G1", "design": "G2", "plan": "G3"}
 
 
 # ───────────────────────── small utilities ─────────────────────────
@@ -426,6 +430,18 @@ def read_modules(project: Project) -> List[Dict[str, Any]]:
     return out
 
 
+def track(project: Project) -> str:
+    """'small' projects run a shorter pipeline (design and plan in one run); everything else is 'standard'."""
+    t = project.meta.get("track")
+    if t in ("small", "standard"):
+        return t
+    return "small" if project.meta.get("size") == "Small" else "standard"
+
+
+def local_cache(project: Project) -> Path:
+    return HOME / "cache" / (project.id + ".json")
+
+
 def default_level(project: Project) -> str:
     return "Light" if project.meta.get("size", "Medium") == "Small" else "Standard"
 
@@ -457,12 +473,52 @@ def read_plan(project: Project) -> Tuple[List[Dict[str, Any]], List[Dict[str, An
     return phases, wps
 
 
-def wp_states(project: Project, wps: List[Dict[str, Any]]) -> Dict[str, str]:
-    st = {w["id"]: (w["planned"] if w["planned"] in WP_STATUSES else "todo") for w in wps}
+def infer_wp(wid: str, rec: Dict[str, Any]) -> Tuple[Optional[str], str]:
+    """State the evidence supports for one work package, and why. (None, '') when there is no evidence."""
+    ev = rec.get("wp", {}).get(wid) or {}
+    prs = [(k, p) for k, p in rec.get("prs", {}).items() if wid in p.get("wps", [])]
+    if not ev and not prs:
+        return None, ""
+    open_pr = [k for k, p in prs if p.get("state") == "OPEN"]
+    merged_pr = [k for k, p in prs if p.get("state") == "MERGED"]
+    br = ev.get("branches", {})
+    open_br = [b for b, v in br.items() if v == "open"]
+    merged_br = [b for b, v in br.items() if v == "merged"]
+    if open_pr or open_br:
+        return "in-progress", ("open pull request %s" % open_pr[0]) if open_pr else ("branch %s not merged" % open_br[0])
+    if merged_pr:
+        return "done", "pull request %s merged" % merged_pr[0]
+    if merged_br:
+        return "done", "branch %s merged" % merged_br[0]
+    if ev.get("closes"):
+        return "done", "a commit says it is complete"
+    return "in-progress", "%d commit(s) name it" % ev.get("commits", 0)
+
+
+def wp_states(project: Project, wps: List[Dict[str, Any]], rec: Optional[Dict[str, Any]] = None
+              ) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """(state per work package, reason per *inferred* work package).
+    What the user recorded as done/deferred/blocked always wins; otherwise evidence can move a package forward."""
+    if rec is None:
+        rec = read_json(project.path / "state" / "reconcile.json", {})
+    explicit: Dict[str, str] = {}
     for ev in project.events():
         if ev.get("type") == "wp.status":
-            st[ev["data"]["wp"]] = ev["data"]["status"]
-    return st
+            explicit[ev["data"]["wp"]] = ev["data"]["status"]
+    st: Dict[str, str] = {}
+    why: Dict[str, str] = {}
+    for w in wps:
+        base = explicit.get(w["id"]) or (w["planned"] if w["planned"] in WP_STATUSES else "todo")
+        if explicit.get(w["id"]) in ("done", "deferred", "blocked"):
+            st[w["id"]] = base
+            continue
+        inf, reason = infer_wp(w["id"], rec)
+        if inf == "done" or (inf == "in-progress" and base == "todo"):
+            st[w["id"]] = inf
+            why[w["id"]] = reason
+        else:
+            st[w["id"]] = base
+    return st, why
 
 
 def doc_text(project: Project, rel: str) -> str:
@@ -520,6 +576,22 @@ def scan_repo(name: str, repo: Path, old_tips: List[str]) -> Dict[str, Any]:
         for sha in out.split():
             name = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
             branch_of.setdefault(sha, name)
+    merges = []
+    if base:
+        rc, out, _ = run(["git", "log", "--merges", "--first-parent", "--format=%H%x1f%aI%x1f%s", base[0]] + excl,
+                         cwd=repo, timeout=120)
+        for ln in out.splitlines():
+            f = ln.split("\x1f")
+            if len(f) != 3:
+                continue
+            merges.append({"sha": f[0][:10], "date": f[1][:10], "subject": f[2][:200]})
+            # commits that arrived through this merge belong to the branch it names
+            m = re.search(r"'([^']+)'|from \S+?/(\S+)", f[2])
+            bname = (m.group(1) or m.group(2)) if m else ""
+            if bname:
+                rc2, out2, _ = run(["git", "rev-list", f[0] + "^2", "^" + f[0] + "^1"], cwd=repo)
+                for sha in out2.split():
+                    branch_of.setdefault(sha, bname)
     fmt = "%x1e%H%x1f%an%x1f%aI%x1f%S%x1f%s"
     rc, out, err = run(["git", "log", "--all", "--no-merges", "--source", "--name-only", "--format=" + fmt] + excl,
                        cwd=repo, timeout=300)
@@ -535,7 +607,9 @@ def scan_repo(name: str, repo: Path, old_tips: List[str]) -> Dict[str, Any]:
             commits.append({"sha": f[0][:10], "author": f[1], "date": f[2][:10], "ref": branch_of.get(f[0], default),
                             "subject": f[4][:200],
                             "files": [x for x in files.splitlines() if x.strip()]})
-    res: Dict[str, Any] = {"tips": tips, "commits": commits, "default": default, "prs": [], "ci": None}
+    res: Dict[str, Any] = {"tips": tips, "commits": commits, "default": default, "prs": [], "ci": None,
+                           "merges": merges,
+                           "default_ref": (base[0] if base else default)}
     rc, url, _ = run(["git", "remote", "get-url", "origin"], cwd=repo)
     if rc == 0 and "github.com" in url and shutil.which("gh"):
         rc, out, _ = run(["gh", "pr", "list", "--state", "all", "--limit", "100", "--json",
@@ -556,14 +630,25 @@ def scan_repo(name: str, repo: Path, old_tips: List[str]) -> Dict[str, Any]:
     return res
 
 
-def cmd_reconcile(project: Project, quiet: bool = False) -> Dict[str, Any]:
+def cmd_reconcile(project: Project, quiet: bool = False, fresh: bool = False) -> Dict[str, Any]:
+    """Read what is new in the code repositories. Quiet by design: nothing is logged or committed unless
+    something changed, and the network is skipped if the last scan was under FETCH_TTL seconds ago."""
+    empty = {"repos": {}, "wp": {}, "modules": {}, "unmatched": [], "prs": {}, "ci": {}, "seen": {}, "inferred": {}}
+    rec_path = project.path / "state" / "reconcile.json"
+    cache = read_json(local_cache(project), {})
+    if not fresh and time.time() - cache.get("last_scan", 0) < FETCH_TTL and rec_path.exists():
+        if not quiet:
+            print("Using the scan from %d min ago (add --fresh to rescan now)." % ((time.time() - cache["last_scan"]) // 60))
+        return read_json(rec_path, empty)
     project.sync_pull()
+    rec = read_json(rec_path, empty)
+    for k, v in empty.items():
+        rec.setdefault(k, v)
+    before = json.dumps(rec, sort_keys=True)
     modules = read_modules(project)
     phases, wps = read_plan(project)
     wp_ids = {w["id"] for w in wps}
     mapping = read_json(project.path / "state" / "mapping.json", {})
-    rec = read_json(project.path / "state" / "reconcile.json",
-                    {"repos": {}, "wp": {}, "modules": {}, "unmatched": [], "prs": {}, "ci": {}, "runs": 0})
     repos = project.repo_paths()
     new_total = 0
     for name, path in repos.items():
@@ -572,48 +657,106 @@ def cmd_reconcile(project: Project, quiet: bool = False) -> Dict[str, Any]:
             continue
         old = list(rec["repos"].get(name, {}).get("tips", {}).values())
         res = scan_repo(name, path, old)
-        rec["repos"][name] = {"tips": res["tips"], "default": res["default"], "last": now()}
-        new_total += len(res["commits"])
+        rec["repos"][name] = {"tips": res["tips"], "default": res["default"]}
+        seen = rec["seen"].setdefault(name, [])
+        seen_set = set(seen)
         for c in res["commits"]:
-            ids = set(md.ids_in(c["subject"] + " " + c["ref"].replace("-", "-")))
-            ids |= set(re.findall(r"WP-\d+", c["ref"].upper()))
+            # A rebased or cherry-picked commit has a new id but the same author, subject and files: count it once.
+            ckey = hashlib.sha1(("%s|%s|%s" % (c["author"], c["subject"], ",".join(sorted(c["files"])))).encode()
+                                ).hexdigest()[:12]
+            if ckey in seen_set:
+                continue
+            seen_set.add(ckey)
+            seen.append(ckey)
+            new_total += 1
+            ids = set(md.ids_in(c["subject"])) | set(re.findall(r"WP-\d+", c["ref"].upper()))
             wp_hits = [i for i in ids if i.startswith("WP-") and i in wp_ids]
             files = [f for f in c["files"] if not ignored(f)]
             mods = sorted({m for f in files for m in module_for(f, modules, mapping)})
-            wp_from_map = [m for m in mods if m.startswith("WP-")]
-            wp_hits = sorted(set(wp_hits) | set(wp_from_map))
+            wp_hits = sorted(set(wp_hits) | {m for m in mods if m.startswith("WP-")})
             mods = [m for m in mods if not m.startswith("WP-")]
-            entry = {"repo": name, "sha": c["sha"], "date": c["date"], "author": c["author"], "subject": c["subject"],
-                     "ref": c["ref"]}
+            on_default = c["ref"] == res["default"]
             for w in wp_hits:
-                e = rec["wp"].setdefault(w, {"commits": 0, "last": "", "exact": True, "authors": []})
+                e = rec["wp"].setdefault(w, {"commits": 0, "last": "", "authors": [], "branches": {}, "tips": {}})
+                e.setdefault("branches", {})
+                e.setdefault("tips", {})
                 e["commits"] += 1
                 e["last"] = max(e["last"], c["date"])
                 if c["author"] not in e["authors"]:
                     e["authors"].append(c["author"])
+                if not on_default:
+                    e["branches"].setdefault("%s:%s" % (name, c["ref"]), "open")
+                elif w in c["subject"].upper() and (CLOSE_RE.search(c["subject"])
+                                                    or re.search(r"\(#\d+\)\s*$", c["subject"])):
+                    e["closes"] = True          # "WP-07 done", "closes WP-07", or a squash-merged pull request
             for m in mods:
                 e = rec["modules"].setdefault(m, {"commits": 0, "last": "", "files": 0})
                 e["commits"] += 1
                 e["files"] += len(files)
                 e["last"] = max(e["last"], c["date"])
             if not wp_hits and not mods and files:
-                entry["files"] = files[:8]
-                rec["unmatched"].append(entry)
+                rec["unmatched"].append({"repo": name, "sha": c["sha"], "date": c["date"], "author": c["author"],
+                                         "subject": c["subject"], "ref": c["ref"], "files": files[:8]})
+        for mg in res.get("merges", []):        # "Merge branch 'WP-07-checkout'" / "Merge pull request #12 from …"
+            mkey = "m:" + mg["sha"]
+            if mkey in seen_set:
+                continue
+            seen_set.add(mkey)
+            seen.append(mkey)
+            for w in set(re.findall(r"WP-\d+", mg["subject"].upper())) & wp_ids:
+                e = rec["wp"].setdefault(w, {"commits": 0, "last": "", "authors": [], "branches": {}, "tips": {}})
+                e.setdefault("branches", {})["%s:merge %s" % (name, mg["sha"])] = "merged"
+                e["commits"] += 1
+                e["last"] = max(e["last"], mg["date"])
+                new_total += 1
+        rec["seen"][name] = seen[-4000:]
         rec["unmatched"] = rec["unmatched"][-200:]
+        # Is each work-package branch still open, or merged into the default branch?
+        dref = res["default_ref"]
+        for w, e in rec["wp"].items():
+            for key in list(e.get("branches", {})):
+                rname, _, bname = key.partition(":")
+                if rname != name or bname.startswith("merge "):
+                    continue
+                tip = res["tips"].get(bname) or res["tips"].get("origin/" + bname)
+                if tip:
+                    e["tips"][key] = tip
+                tip = tip or e.get("tips", {}).get(key)
+                if tip and run(["git", "merge-base", "--is-ancestor", tip, dref], cwd=path)[0] == 0:
+                    e["branches"][key] = "merged"
+                elif bname in res["tips"] or ("origin/" + bname) in res["tips"]:
+                    e["branches"][key] = "open"
+                else:
+                    e["branches"][key] = "gone"      # deleted without a merge commit: a merged pull request decides
         for pr in res["prs"]:
             ids = set(re.findall(r"WP-\d+", (pr.get("title", "") + " " + pr.get("headRefName", "")).upper()))
             rec["prs"]["%s#%s" % (name, pr["number"])] = {
                 "title": pr.get("title", "")[:120], "state": pr.get("state"), "branch": pr.get("headRefName"),
                 "updated": (pr.get("updatedAt") or "")[:10], "merged": (pr.get("mergedAt") or "")[:10],
-                "draft": pr.get("isDraft", False), "wps": sorted(ids), "url": pr.get("url")}
-        rec["ci"][name] = res["ci"]
-    rec["runs"] = rec.get("runs", 0) + 1
-    rec["last"] = now()
-    write_json(project.path / "state" / "reconcile.json", rec)
-    append_event(project, "reconcile.run", "atlas", "Reconciled %d repo(s): %d new commit(s)" % (len(repos), new_total),
-                 data={"repos": list(repos), "new_commits": new_total})
+                "draft": pr.get("isDraft", False), "wps": sorted(ids & wp_ids), "url": pr.get("url")}
+        ci = res["ci"]
+        rec["ci"][name] = {k: ci.get(k) for k in ("status", "conclusion", "workflowName", "url")} if ci else None
+    # Record what the evidence now says about each work package
+    changes = []
+    for w in wps:
+        inf, reason = infer_wp(w["id"], rec)
+        if inf and rec["inferred"].get(w["id"]) != inf:
+            rec["inferred"][w["id"]] = inf
+            changes.append((w["id"], inf, reason))
+    cache["last_scan"] = time.time()
+    write_json(local_cache(project), cache)
+    if json.dumps(rec, sort_keys=True) != before:
+        write_json(rec_path, rec)
+        states, _ = wp_states(project, wps, rec)
+        for wid, inf, reason in changes:
+            if states.get(wid) == inf:
+                append_event(project, "wp.inferred", "atlas", "%s → %s (%s)" % (wid, inf, reason), refs=[wid],
+                             data={"wp": wid, "status": inf, "reason": reason})
+        if new_total:
+            append_event(project, "reconcile.run", "atlas", "%d new commit(s) in %d repo(s)" % (new_total, len(repos)),
+                         data={"repos": list(repos), "new_commits": new_total})
     if not quiet:
-        print("Reconciled %d repo(s), %d new commit(s)." % (len(repos), new_total))
+        print("Scanned %d repo(s): %d new commit(s), %d work package(s) moved." % (len(repos), new_total, len(changes)))
     return rec
 
 
@@ -622,12 +765,38 @@ def cmd_reconcile(project: Project, quiet: bool = False) -> Dict[str, Any]:
 def stage_state(evs: List[Dict[str, Any]]) -> Dict[str, str]:
     st = {s: "not started" for s in STAGES}
     for ev in evs:
-        s = ev.get("data", {}).get("stage")
-        if ev.get("type") == "stage.started" and s in st and st[s] != "done":
-            st[s] = "in progress"
-        elif ev.get("type") == "stage.finished" and s in st:
-            st[s] = "done"
+        d = ev.get("data", {})
+        sname = d.get("stage")
+        if sname not in st:
+            continue
+        if ev.get("type") == "stage.started" and st[sname] not in ("done", "skipped"):
+            st[sname] = "in progress"
+        elif ev.get("type") == "stage.finished":
+            st[sname] = "done"
+        elif ev.get("type") == "stage.set" and d.get("state") in ("done", "skipped", "not started", "in progress"):
+            st[sname] = d["state"]
     return st
+
+
+def effective_stages(project: Project, st: Dict[str, str]) -> Tuple[Dict[str, str], List[str]]:
+    """Correct the recorded stages from what exists on disk, so a missed event or an adopted project still gets
+    the right next step. Returns (stages, names of stages whose state was assumed)."""
+    st = dict(st)
+    _, wps = read_plan(project)
+    arts = {"define": (project.path / "discovery" / "PRD.md").exists(),
+            "design": (project.path / "design" / "TECHNICAL.md").exists(),
+            "plan": bool(wps)}
+    order = ["define", "design", "plan"]
+    assumed = []
+    for i, name in enumerate(order):
+        later = any(arts[x] or st[x] != "not started" for x in order[i + 1:])
+        if st[name] in ("not started", "in progress") and later:
+            st[name] = "done" if arts[name] else "skipped"
+            assumed.append(name)
+        elif st[name] == "not started" and arts[name]:
+            st[name] = "in progress"
+            assumed.append(name)
+    return st, assumed
 
 
 def gate_state(evs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -665,8 +834,8 @@ def build_status(project: Project, rec: Optional[Dict[str, Any]] = None) -> Dict
     modules = read_modules(project)
     mod_by = {m["id"]: m for m in modules}
     phases, wps = read_plan(project)
-    states = wp_states(project, wps)
-    stages = stage_state(evs)
+    states, inferred = wp_states(project, wps, rec)
+    stages, assumed = effective_stages(project, stage_state(evs))
     gates = gate_state(evs)
     released = [ev["data"].get("phase") for ev in evs if ev.get("type") == "phase.released"]
     crs: Dict[str, Dict[str, Any]] = {}
@@ -679,8 +848,8 @@ def build_status(project: Project, rec: Optional[Dict[str, Any]] = None) -> Dict
     learned_ok = {ev["data"].get("sha") for ev in evs if ev.get("type") == "drift.resolved"}
 
     # work package evidence & confidence
-    ci_green = all((c or {}).get("conclusion") in (None, "success") for c in rec.get("ci", {}).values()) \
-        if rec.get("ci") else None
+    ci_runs = [c for c in (rec.get("ci") or {}).values() if c and c.get("conclusion")]
+    ci_green = all(c["conclusion"] == "success" for c in ci_runs) if ci_runs else None
     tc_status = test_status(project)
     if tc_status:
         links, _ = id_graph(project)
@@ -708,15 +877,18 @@ def build_status(project: Project, rec: Optional[Dict[str, Any]] = None) -> Dict
                 conf = "claimed"
         level = max([mod_by[m]["rigour"] for m in w["modules"] if m in mod_by] or [default_level(project)],
                     key=LEVELS.index)
+        if evidence == "none" and any(w["id"] in p.get("wps", []) for p in rec.get("prs", {}).values()):
+            evidence = "exact"
         wp_rows.append({**w, "state": state, "evidence": evidence, "confidence": conf, "level": level,
+                        "inferred": inferred.get(w["id"], ""),
                         "commits": (ev or {}).get("commits", 0), "last": (ev or {}).get("last", "")})
 
     # drift
     drift = []
     for w in wp_rows:
-        if w["state"] == "todo" and w["evidence"] == "exact":
-            drift.append("%s is recorded as todo but %d commit(s) name it — mark it in progress or done?"
-                         % (w["id"], w["commits"]))
+        if w["state"] == "done" and w["inferred"] and w["level"] == "Critical":
+            drift.append("%s (Critical) looks done (%s) — confirm with `atlas wp %s done` once reviewed."
+                         % (w["id"], w["inferred"], w["id"]))
         if w["state"] == "done" and w["evidence"] == "none":
             drift.append("%s is recorded as done but no code evidence was found — confirm, or record the paths "
                          "with `atlasctl learn`." % w["id"])
@@ -742,11 +914,12 @@ def build_status(project: Project, rec: Optional[Dict[str, Any]] = None) -> Dict
     for w in wp_rows:
         if w["state"] == "blocked":
             att.append((0 if w["level"] == "Critical" else 1, "%s is blocked: %s" % (w["id"], w["title"])))
-        if w["level"] == "Critical" and w["state"] == "done" and w["confidence"] != "verified":
+        if w["level"] == "Critical" and w["state"] == "done" and w["confidence"] != "verified" \
+                and not w["inferred"]:
             att.append((0, "%s (Critical) is done but only %s — needs tests and sign-off" % (w["id"], w["confidence"])))
     unconf = [m["id"] for m in modules if not m["confirmed"]]
     if unconf:
-        att.append((1, "Rigour not confirmed for %s — run `atlasctl rigour <M> <level> --reason …`" % ", ".join(unconf)))
+        att.append((1, "Rigour not confirmed for %s — `atlas rigour --accept [M2=Critical …]`" % ", ".join(unconf)))
     q_total, q_block = open_questions(project)
     if q_block:
         att.append((0, "%d client question(s) needed before we start are still open" % q_block))
@@ -769,12 +942,23 @@ def build_status(project: Project, rec: Optional[Dict[str, Any]] = None) -> Dict
     for cid, c in crs.items():
         if c["state"] in ("opened", "approved"):
             att.append((1, "%s is %s: %s" % (cid, c["state"], c["title"])))
+    import flow  # noqa: E402  (stamps and notes live there)
+    for line in flow.stale_lines(project):
+        att.append((1, line))
+    notes = flow.open_notes(evs)
+    if notes:
+        by: Dict[str, int] = {}
+        for n in notes:
+            by[n["to"]] = by.get(n["to"], 0) + 1
+        att.append((2, "Notes waiting: " + ", ".join("%d for %s" % (c, a) for a, c in sorted(by.items()))))
     att.sort(key=lambda x: x[0])
 
-    nxt = next_step(project, stages, gates, phases, wp_rows, released, current_phase)
-    return {"stages": stages, "gates": gates, "phases": phases, "wps": wp_rows, "modules": modules,
-            "released": released, "current_phase": current_phase, "attention": [a[1] for a in att],
-            "next": nxt, "crs": crs, "unmatched": unmatched, "rec": rec, "questions": (q_total, q_block)}
+    ni = next_step(project, stages, gates, phases, wp_rows, released, current_phase)
+    return {"stages": stages, "assumed": assumed, "gates": gates, "phases": phases, "wps": wp_rows,
+            "modules": modules, "released": released, "current_phase": current_phase,
+            "attention": [a[1] for a in att], "next": ni["text"], "next_info": ni, "crs": crs,
+            "unmatched": unmatched, "rec": rec, "questions": (q_total, q_block), "track": track(project),
+            "notes": notes}
 
 
 def test_status(project: Project) -> Dict[str, str]:
@@ -794,60 +978,84 @@ def test_status(project: Project) -> Dict[str, str]:
 
 
 def next_step(project: Project, stages: Dict[str, str], gates: Dict[str, Any], phases: List[Dict[str, Any]],
-              wps: List[Dict[str, Any]], released: List[str], current_phase: Optional[str]) -> str:
-    def passed(g: str) -> bool:
-        return gates.get(g, {}).get("result") in ("passed", "waived")
+              wps: List[Dict[str, Any]], released: List[str], current_phase: Optional[str]) -> Dict[str, Any]:
+    """What should happen next: text for people, plus agent / gate / phase for `atlas go`."""
+    def N(text: str, agent: str = "", gate: str = "", phase: str = "", interactive: bool = False) -> Dict[str, Any]:
+        return {"text": text, "agent": agent, "gate": gate, "phase": phase, "interactive": interactive}
+
+    def ok(stage: str) -> bool:
+        return stages[stage] in ("done", "skipped")
+
+    def passed(g: str, stage: str = "") -> bool:
+        return gates.get(g, {}).get("result") in ("passed", "waived") or (stage and stages[stage] == "skipped")
+
     has = lambda rel: (project.path / rel).exists()  # noqa: E731
-    if stages["define"] != "done":
+    small = track(project) == "small"
+    if not ok("define"):
         src = [f for f in (project.path / "discovery" / "sources").glob("*") if f.name not in ("README.txt", ".gitkeep")]
         if not src and not has("discovery/PRD.md"):
-            return "Add the client's meeting transcripts and documents to discovery/sources/, then run /alice."
-        return "Run /alice (discovery: PRD, proposal, questions)."
-    if not passed("G1"):
-        return "Run the G1 gate: `/spartan G1` (needs client sign-off: `atlasctl signoff`)."
-    if stages["design"] != "done":
-        return "Run /stark (design: architecture, data model, modules and rigour levels)."
-    if not passed("G2"):
-        return "Confirm module rigour levels, then run `/spartan G2`."
-    if stages["plan"] != "done":
-        return "Run /jarvis (plan: phases and work packages)."
-    if not passed("G3"):
-        return "Run `/spartan G3`, then `atlasctl publish` to put the blueprint in the code repo."
+            return N("Add the client's transcripts and documents (`atlas intake <files or folder>`), then run /alice.",
+                     "user")
+        return N("Run /alice (discovery: PRD, proposal, questions).", "alice", interactive=True)
+    if not passed("G1", "define"):
+        return N("Ready-for-design check (G1) has open items.", gate="G1")
+    if not ok("design"):
+        return N("Run /stark (design%s)." % (" and plan, in one run" if small else ": architecture, modules, rigour"),
+                 "stark")
+    if not passed("G2", "design"):
+        return N("Ready-for-planning check (G2) has open items.", gate="G2")
+    if not ok("plan"):
+        return N("Run /jarvis (plan: phases and work packages).", "jarvis")
+    if not passed("G3", "plan"):
+        return N("Ready-to-build check (G3) has open items.", gate="G3")
+    if project.meta.get("repos") and not any(e.get("type") == "blueprint.published" for e in project.events()):
+        return N("Publish the blueprint into the code repository: `atlas publish` (preview), then `--yes`.", "atlas")
     if current_phase:
         open_wps = [w for w in wps if w["phase"] == current_phase and w["state"] not in ("done", "deferred")]
         if open_wps:
-            return "Build phase %s: %d work package(s) open (%s). Run /atlas after pushing work." % (
-                current_phase, len(open_wps), ", ".join(w["id"] for w in open_wps[:6]))
+            return N("Build phase %s: %d work package(s) open (%s)." % (
+                current_phase, len(open_wps), ", ".join(w["id"] for w in open_wps[:6])), "user", phase=current_phase)
         if not passed("G4/" + current_phase):
-            return "Phase %s build looks complete — run `/spartan G4 --phase %s`." % (current_phase, current_phase)
-        if not has("test/TEST-PLAN.md"):
-            return "Run /sentinel for phase %s (test plan, UAT, go-live)." % current_phase
+            return N("Build of %s looks complete; the ready-to-test check (G4) has open items." % current_phase,
+                     gate="G4", phase=current_phase)
+        tp = doc_text(project, "test/TEST-PLAN.md")
+        tested = any(e.get("type") == "stage.finished" and e.get("data", {}).get("stage") == "test"
+                     and e["data"].get("phase") == current_phase for e in project.events())
+        if not tested or not re.search(r"^##+\s+%s\b" % re.escape(current_phase), tp, flags=re.M):
+            return N("Run /sentinel %s (test plan, client acceptance script, go-live checklist)." % current_phase,
+                     "sentinel", phase=current_phase)
         if not passed("G5/" + current_phase):
-            return "Finish testing and UAT for %s, then `/spartan G5 --phase %s`." % (current_phase, current_phase)
-        return "Release %s: `atlasctl release %s`." % (current_phase, current_phase)
+            return N("Ready-to-release check (G5) for %s has open items." % current_phase, gate="G5",
+                     phase=current_phase)
+        return N("Deploy %s, then record it: `atlas release %s`." % (current_phase, current_phase), "atlas",
+                 phase=current_phase)
     if phases and stages["handover"] != "done":
-        return "All phases released — run `/alice handover`."
+        return N("All phases released — run /alice handover.", "alice", interactive=True)
     if not phases:
-        return "PLAN.md has no phases — run /jarvis."
-    return "Project complete. Archive it or open a change request."
+        return N("PLAN.md has no phases — run /jarvis.", "jarvis")
+    return N("Project complete. Open a change request if the client wants more.", "")
 
 
 def render_status(project: Project, s: Dict[str, Any]) -> str:
     m = project.meta
     L = ["# %s — %s · status" % (m["id"], m["name"]), "",
-         "_Generated by atlasctl on %s — do not edit._" % now(), "",
+         "_Generated by atlasctl — do not edit._", "",
          "| | |", "|---|---|",
          "| Client | %s |" % m.get("client", ""), "| Size | %s |" % m.get("size", ""),
          "| Current phase | %s |" % (s["current_phase"] or "—"),
          "| Next step | %s |" % s["next"], ""]
+    if s.get("gate_todo"):
+        gt = s["gate_todo"]
+        L += ["## To pass %s%s" % (gt["gate"], ("/" + gt["phase"]) if gt.get("phase") else ""), ""]
+        L += ["- %s%s" % (i["check"], (" — " + i["detail"]) if i["detail"] else "") for i in gt["items"]] + [""]
     L += ["## Needs attention", ""]
     L += ["- " + a for a in s["attention"]] or ["- Nothing right now."]
     L += ["", "## Stages", "", "| Stage | State | Gate after |", "|---|---|---|"]
     gmap = {"define": "G1", "design": "G2", "plan": "G3"}
     for st in STAGES:
         g = gmap.get(st, "")
-        L.append("| %s | %s | %s |" % (st, s["stages"][st], ("%s %s" % (g, s["gates"].get(g, {}).get("result", "—")))
-                                       if g else ""))
+        L.append("| %s | %s%s | %s |" % (st, s["stages"][st], " (assumed)" if st in s.get("assumed", []) else "",
+                                         ("%s %s" % (g, s["gates"].get(g, {}).get("result", "—"))) if g else ""))
     if s["phases"]:
         L += ["", "## Phases", "", "| Phase | Goal | Done | Open | Gates | State |", "|---|---|---|---|---|---|"]
         for p in s["phases"]:
@@ -865,7 +1073,8 @@ def render_status(project: Project, s: Dict[str, Any]) -> str:
             evd = {"exact": "%d commit(s), last %s" % (w["commits"], w["last"]), "module": "module activity",
                    "none": "—"}[w["evidence"]]
             L.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % (w["id"], w["title"][:60], w["phase"],
-                                                                   ", ".join(w["modules"]), w["level"], w["state"],
+                                                                   ", ".join(w["modules"]), w["level"],
+                                                                   w["state"] + (" (inferred)" if w["inferred"] else ""),
                                                                    evd, w["confidence"] or "—"))
     if s["modules"]:
         L += ["", "## Modules", "", "| Module | Name | Rigour | Confirmed | Code activity |", "|---|---|---|---|---|"]
@@ -960,8 +1169,32 @@ def cmd_setup(a: argparse.Namespace) -> None:
             git_pull(regdir)
         print("GitHub mode: owner %s · registry %s · local clones in %s" % (owner, name, cfg["local_root"]))
     save_config(cfg)
+    install_shim()
     if not a.no_deps:
         deps_report(install=True)
+
+
+def install_shim() -> None:
+    """Install an `atlas` terminal command that always runs the newest installed copy of this plugin."""
+    (HOME / "bin").mkdir(parents=True, exist_ok=True)
+    (HOME / "lib_path").write_text(str(LIB), encoding="utf-8")
+    shim = HOME / "bin" / "atlas"
+    shim.write_text('#!/bin/sh\nexec python3 "$(cat "${ATLAS_HOME:-$HOME/.atlas}/lib_path")/atlasctl.py" "$@"\n',
+                    encoding="utf-8")
+    shim.chmod(0o755)
+    if os.environ.get("ATLAS_HOME"):
+        return                                  # a test home: do not touch the user's PATH folders
+    target = Path.home() / ".local" / "bin" / "atlas"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink() or target.exists():
+            target.unlink()
+        target.symlink_to(shim)
+        on_path = str(target.parent) in os.environ.get("PATH", "").split(os.pathsep)
+        print("Terminal command installed: %s%s" % (target, "" if on_path else
+              '  (add ~/.local/bin to your PATH to type `atlas status` anywhere)'))
+    except OSError as e:
+        print("Could not link the `atlas` command into ~/.local/bin (%s); use %s" % (e, shim))
 
 
 def deps_report(install: bool = False) -> None:
@@ -1014,7 +1247,10 @@ def cmd_new(a: argparse.Namespace) -> None:
             cfg.setdefault("repo_paths", {}).setdefault(pid, {})[name] = str(rp.resolve())
         else:
             repos.append({"name": name, "url": loc})
+    if a.track and a.track not in ("small", "standard"):
+        die("--track must be small or standard")
     meta = {"id": pid, "name": a.name, "client": a.client or "", "size": (a.size or "").capitalize(),
+            **({"track": a.track} if a.track else {}),
             "author": a.author or "", "created": today(), "storage": cfg["mode"], "repos": repos}
     write_json(d / "atlas.json", meta)
     (d / ".gitignore").write_text("state/lock\n*.tmp\n.DS_Store\n", encoding="utf-8")
@@ -1022,6 +1258,20 @@ def cmd_new(a: argparse.Namespace) -> None:
     proj = Project(d, cfg)
     append_event(proj, "project.created", "atlas", "Project %s created" % a.name, refs=[pid],
                  data={"size": meta["size"], "client": meta["client"]}, by="user")
+    if a.prd:
+        src = Path(a.prd).expanduser()
+        if not src.exists():
+            die("--prd file not found: %s" % src)
+        (d / "design" / "sources").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, d / "design" / "sources" / src.name)
+        a.start = a.start or "design"
+    if a.start:
+        order = ["define", "design", "plan", "build"]
+        if a.start not in order:
+            die("--start must be design, plan or build")
+        for st in order[:order.index(a.start)]:
+            append_event(proj, "stage.set", "atlas", "Stage %s skipped: project adopted at %s" % (st, a.start),
+                         by="user", data={"stage": st, "state": "skipped", "reason": "adopted at " + a.start})
     write_views(proj, build_status(proj))
     if cfg["mode"] == "github":
         run(["git", "init", "-q", "-b", "main"], cwd=d, check=True)
@@ -1038,7 +1288,11 @@ def cmd_new(a: argparse.Namespace) -> None:
     cfg["current"] = pid
     save_config(cfg)
     print("Created %s at %s%s" % (pid, d, (" (private repo %s)" % entry["remote"]) if entry.get("remote") else ""))
-    print("Next: put the client's files in %s, then run /alice." % (d / "discovery" / "sources"))
+    if a.start:
+        print("Adopted at the %s stage%s. Run /atlas for the next step." % (
+            a.start, " — your PRD is in design/sources/ for Stark" if a.prd else ""))
+    else:
+        print("Next: add the client's files (`atlas intake <files or folder>`), then run /alice.")
 
 
 def git_url(p: Path) -> str:
@@ -1126,25 +1380,85 @@ def cmd_event(a: argparse.Namespace) -> None:
     print("Logged #%d %s" % (ev["seq"], a.type))
 
 
+def saved_answers(p: Project, gate: str, phase: Optional[str]) -> Dict[str, str]:
+    """Yes/no answers the user already gave for a gate's questions (so they are asked once)."""
+    out: Dict[str, str] = {}
+    for ev in p.events():
+        d = ev.get("data", {})
+        if ev.get("type") == "gate.answer" and d.get("gate") == gate and (d.get("phase") or "") == (phase or ""):
+            out.update(d.get("answers", {}))
+    return out
+
+
+def auto_gates(p: Project, s: Dict[str, Any]) -> Dict[str, Any]:
+    """Run whichever gate the project is waiting on. A gate that passes is recorded and the next one is tried;
+    one with open items is attached to the status as `gate_todo`. Nobody has to remember to run a gate."""
+    import gates as G  # noqa: E402
+    for _ in range(5):
+        ni = s["next_info"]
+        if not ni.get("gate"):
+            break
+        g, ph = ni["gate"], (ni.get("phase") or None)
+        results = G.run_gate(p, g, ph, saved_answers(p, g, ph))
+        todo = [r for r in results if r["result"] in ("fail", "ask")]
+        if todo:
+            s["gate_todo"] = {"gate": g, "phase": ph or "", "items": todo}
+            break
+        append_event(p, "gate.passed", "atlas", "%s%s passed (%d checks)" % (g, ("/" + ph) if ph else "", len(results)),
+                     refs=[g], data={"gate": g, "phase": ph or "", "auto": True, "checks": len(results)})
+        s = build_status(p, s["rec"])
+    return s
+
+
+def print_gate_todo(s: Dict[str, Any]) -> None:
+    gt = s.get("gate_todo")
+    if not gt:
+        return
+    name = gt["gate"] + (("/" + gt["phase"]) if gt["phase"] else "")
+    print("To pass %s:" % name)
+    for i in gt["items"]:
+        ask = "  (answer: atlas gate %s%s --answer %s=yes|no)" % (
+            gt["gate"], (" --phase " + gt["phase"]) if gt["phase"] else "", i["key"]) if i["result"] == "ask" else ""
+        print("  - %s%s%s" % (i["check"], (" — " + i["detail"]) if i["detail"] else "", ask))
+
+
+def status_summary(p: Project, s: Dict[str, Any]) -> Dict[str, Any]:
+    cur = s["current_phase"]
+    return {
+        "project": {k: p.meta.get(k, "") for k in ("id", "name", "client", "size", "author")},
+        "path": str(p.path), "track": s["track"], "stages": s["stages"], "current_phase": cur,
+        "next": s["next_info"], "gate_todo": s.get("gate_todo"), "attention": s["attention"],
+        "modules": [{k: m[k] for k in ("id", "name", "rigour", "confirmed")} for m in s["modules"]],
+        "phases": [{"id": ph["id"], "name": ph["name"], "released": ph["id"] in s["released"],
+                    "done": sum(1 for w in s["wps"] if w["phase"] == ph["id"] and w["state"] in ("done", "deferred")),
+                    "total": sum(1 for w in s["wps"] if w["phase"] == ph["id"])} for ph in s["phases"]],
+        "open_work": [{k: w[k] for k in ("id", "title", "state", "level", "confidence")} for w in s["wps"]
+                      if w["phase"] == cur and w["state"] not in ("done", "deferred")],
+        "notes": len(s["notes"]), "questions_open": s["questions"][0], "questions_blocking": s["questions"][1],
+        "ci": {k: (v or {}).get("conclusion") for k, v in (s["rec"].get("ci") or {}).items()},
+    }
+
+
 def cmd_status(a: argparse.Namespace) -> None:
     cfg = load_config()
     p = find_project(cfg, a.project)
-    rec = None if a.no_reconcile else cmd_reconcile(p, quiet=True)
-    s = build_status(p, rec)
+    rec = None if a.no_reconcile else cmd_reconcile(p, quiet=True, fresh=a.fresh)
+    s = auto_gates(p, build_status(p, rec))
     write_views(p, s)
     p.sync_push("Status %s" % today())
-    if a.json:
+    if a.json == "full":
         out = {k: v for k, v in s.items() if k != "rec"}
-        out["ci"] = s["rec"].get("ci", {})
-        out["prs"] = s["rec"].get("prs", {})
-        out["project"] = p.meta
-        out["path"] = str(p.path)
-        print(json.dumps(out, indent=1, default=str))
+        out.update({"ci": s["rec"].get("ci", {}), "prs": s["rec"].get("prs", {}), "project": p.meta,
+                    "path": str(p.path)})
+        print(json.dumps(out, default=str))
+        return
+    if a.json:
+        print(json.dumps(status_summary(p, s), default=str))
         return
     m = p.meta
+    sym = {"done": "✓", "in progress": "…", "not started": "·", "skipped": "–"}
     print("%s — %s  (%s, %s)" % (m["id"], m["name"], m.get("client", ""), m.get("size", "")))
-    print("Stages: " + " · ".join("%s %s" % (st, {"done": "✓", "in progress": "…", "not started": "·"}[s["stages"][st]])
-                                  for st in STAGES))
+    print("Stages: " + " · ".join("%s %s" % (st, sym[s["stages"][st]]) for st in STAGES))
     if s["phases"]:
         cur = s["current_phase"]
         ws = [w for w in s["wps"] if w["phase"] == cur]
@@ -1152,12 +1466,12 @@ def cmd_status(a: argparse.Namespace) -> None:
                                                                sum(1 for w in ws if w["state"] in ("done", "deferred")),
                                                                len(ws)))
     print("Needs attention:" if s["attention"] else "Needs attention: nothing.")
-    for x in s["attention"][:15]:
+    for x in s["attention"][:12]:
         print("  - " + x)
-    if len(s["attention"]) > 15:
-        print("  … %d more in views/STATUS.md" % (len(s["attention"]) - 15))
+    if len(s["attention"]) > 12:
+        print("  … %d more in views/STATUS.md" % (len(s["attention"]) - 12))
     print("Next: " + s["next"])
-    print("Full status: %s" % (p.path / "views" / "STATUS.md"))
+    print_gate_todo(s)
 
 
 def cmd_unmatched(a: argparse.Namespace) -> None:
@@ -1229,19 +1543,44 @@ def cmd_wp(a: argparse.Namespace) -> None:
 
 
 def cmd_rigour(a: argparse.Namespace) -> None:
+    """`rigour M1 Critical --reason …` confirms one module; `rigour --accept [M2=Critical …]` confirms every
+    unconfirmed module at its proposed level, with the overrides given."""
     cfg = load_config()
     p = find_project(cfg, a.project)
-    lvl = a.level.capitalize()
-    if lvl not in LEVELS:
-        die("level must be Light, Standard or Critical")
     mods = {m["id"]: m for m in read_modules(p)}
-    if a.module not in mods:
-        die("%s is not in design/MODULES.md" % a.module)
-    append_event(p, "rigour.set", "atlas", "%s %s → %s: %s" % (a.module, mods[a.module]["name"], lvl, a.reason),
-                 refs=[a.module], data={"module": a.module, "level": lvl, "proposed": mods[a.module]["proposed"],
-                                        "reason": a.reason}, by="user")
-    p.sync_push("Rigour %s %s" % (a.module, lvl))
-    print("%s confirmed as %s." % (a.module, lvl))
+    if not mods:
+        die("design/MODULES.md has no modules yet")
+    todo: List[Tuple[str, str, str]] = []
+    if a.accept:
+        over = {}
+        for it in a.items:
+            if "=" not in it:
+                die("with --accept, overrides look like M2=Critical")
+            k, v = it.split("=", 1)
+            over[k.strip().upper()] = v.strip().capitalize()
+        for mid, m in mods.items():
+            if mid in over:
+                todo.append((mid, over[mid], a.reason or "changed by the user"))
+            elif not m["confirmed"]:
+                todo.append((mid, m["rigour"], a.reason or "as proposed"))
+    else:
+        if len(a.items) != 2:
+            die("usage: rigour <M#> <Light|Standard|Critical> --reason \"…\"   or   rigour --accept [M2=Critical …]")
+        todo.append((a.items[0].upper(), a.items[1].capitalize(), a.reason or "set by the user"))
+    for mid, lvl, why in todo:
+        if mid not in mods:
+            die("%s is not in design/MODULES.md" % mid)
+        if lvl not in LEVELS:
+            die("level must be Light, Standard or Critical (got %s for %s)" % (lvl, mid))
+    for mid, lvl, why in todo:
+        append_event(p, "rigour.set", "atlas", "%s %s → %s: %s" % (mid, mods[mid]["name"], lvl, why), refs=[mid],
+                     data={"module": mid, "level": lvl, "proposed": mods[mid]["proposed"], "reason": why}, by="user")
+        print("%s %s confirmed as %s." % (mid, mods[mid]["name"], lvl))
+    if not todo:
+        print("Every module is already confirmed.")
+    s = auto_gates(p, build_status(p))
+    write_views(p, s)
+    p.sync_push("Rigour confirmed")
 
 
 def snapshot(p: Project, label: str, files: List[str]) -> Tuple[str, List[Dict[str, str]]]:
@@ -1342,6 +1681,7 @@ def id_graph(p: Project) -> Tuple[Dict[str, set], Dict[str, str]]:
             files.append(f)
     for f in files:
         rel = str(f.relative_to(p.path))
+        in_discovery = rel.startswith("discovery")
         for t in md.read_tables(f):
             for r in t.rows:
                 if not r:
@@ -1350,9 +1690,11 @@ def id_graph(p: Project) -> Tuple[Dict[str, set], Dict[str, str]]:
                 if len(own) != 1:
                     continue
                 me = own[0]
+                if in_discovery and re.match(r"^M\d+$", me):
+                    continue
                 where.setdefault(me, rel)
                 others = set(md.expand_ranges(" ".join(r[1:]))) - {me}
-                others = {o for o in others if not md.WEAK_LINK.match(o) or o.startswith("M")}
+                others = {o for o in others if not md.WEAK_LINK.match(o) or (o.startswith("M") and not in_discovery)}
                 links.setdefault(me, set()).update(others)
     return links, where
 
@@ -1415,20 +1757,28 @@ def cmd_gate(a: argparse.Namespace) -> None:
     import gates as gates_mod  # noqa: E402
     if g == "G4" and not a.no_reconcile:
         cmd_reconcile(p, quiet=True)
-    results = gates_mod.run_gate(p, g, a.phase, answers=dict(x.split("=", 1) for x in (a.answer or [])))
+    given = dict(x.split("=", 1) for x in (a.answer or []) if "=" in x)
+    if given:
+        append_event(p, "gate.answer", "atlas", "%s answered: %s" % (g, ", ".join("%s=%s" % kv for kv in given.items())),
+                     refs=[g], data={**data, "answers": given}, by="user")
+    answers = saved_answers(p, g, a.phase)
+    results = gates_mod.run_gate(p, g, a.phase, answers=answers)
     fails = [r for r in results if r["result"] == "fail"]
     asks = [r for r in results if r["result"] == "ask"]
     for r in results:
+        if r["result"] in ("pass", "n/a") and not a.all:
+            continue
         mark = {"pass": "PASS", "fail": "FAIL", "ask": "ASK ", "n/a": "n/a "}[r["result"]]
         print("[%s] %s%s" % (mark, r["check"], (" — " + r["detail"]) if r["detail"] else ""))
     verdict = "failed" if fails else ("pending" if asks else "passed")
-    print("\n%s%s: %s (%d pass, %d fail, %d need an answer)" % (g, ("/" + a.phase) if a.phase else "", verdict.upper(),
+    print("%s%s: %s (%d pass, %d fail, %d need an answer)" % (g, ("/" + a.phase) if a.phase else "", verdict.upper(),
                                                              sum(r["result"] == "pass" for r in results), len(fails),
                                                              len(asks)))
     if asks:
         print("Answer with: atlasctl gate %s%s --answer <key>=yes|no …  (keys: %s)" % (
             g, (" --phase " + a.phase) if a.phase else "", ", ".join(r["key"] for r in asks)))
-    if a.record and verdict != "pending":
+    already = gate_state(p.events()).get(g + (("/" + a.phase) if a.phase else ""), {}).get("result")
+    if (a.record and verdict != "pending") or (verdict == "passed" and already != "passed"):
         append_event(p, "gate." + verdict, "spartan", "%s%s %s: %d checks, %d failed" % (
             g, ("/" + a.phase) if a.phase else "", verdict, len(results), len(fails)), refs=[g],
             data={**data, "results": results})
@@ -1444,7 +1794,7 @@ def cmd_release(a: argparse.Namespace) -> None:
     p = find_project(cfg, a.project)
     gates = gate_state(p.events())
     if gates.get("G5/" + a.phase, {}).get("result") not in ("passed", "waived") and not a.force:
-        die("G5 has not passed for %s. Run `/spartan G5 --phase %s` first (or --force)." % (a.phase, a.phase))
+        die("G5 has not passed for %s. `atlas status` lists what is open (or use --force)." % a.phase)
     append_event(p, "phase.released", "atlas", "%s released%s" % (a.phase, (": " + a.note) if a.note else ""),
                  refs=[a.phase], data={"phase": a.phase, "note": a.note or "", "forced": bool(a.force)}, by="user")
     write_views(p, build_status(p))
@@ -1558,7 +1908,7 @@ def cmd_publish(a: argparse.Namespace) -> None:
     items = []
     for sub in ("design", "plan"):
         for f in sorted((p.path / sub).rglob("*")):
-            if f.is_file() and "_work" not in f.parts and f.name != ".gitkeep":
+            if f.is_file() and "_work" not in f.parts and "sources" not in f.parts and f.name != ".gitkeep":
                 items.append((f, dest / f.relative_to(p.path)))
     if not items:
         die("nothing to publish yet (design/ and plan/ are empty)")
@@ -1566,8 +1916,29 @@ def cmd_publish(a: argparse.Namespace) -> None:
         print("Would copy %d file(s) into %s:" % (len(items), dest))
         for s, d in items[:40]:
             print("  %s" % d.relative_to(repos[name]))
-        print("Nothing from discovery/ (client material) is included. Re-run with --yes to copy.")
+        print("Nothing from discovery/ (client material) is included. Re-run with --yes to copy "
+              "(add --always to re-publish automatically whenever the plan changes).")
         return
+    if a.always:
+        p.meta["auto_publish"] = name
+        write_json(p.path / "atlas.json", p.meta)
+    n = do_publish(p, name)
+    p.sync_push("Publish blueprint")
+    print("Copied %d file(s) to %s and updated AGENTS.md / CLAUDE.md. Commit them in the code repo when ready."
+          % (n, dest))
+
+
+def do_publish(p: Project, name: str) -> int:
+    """Copy design/ and plan/ into <code repo>/docs/blueprint and point coding agents at it. Returns files copied."""
+    repos = p.repo_paths()
+    if name not in repos:
+        return 0
+    dest = repos[name] / "docs" / "blueprint"
+    items = []
+    for sub in ("design", "plan"):
+        for f in sorted((p.path / sub).rglob("*")):
+            if f.is_file() and "_work" not in f.parts and "sources" not in f.parts and f.name != ".gitkeep":
+                items.append((f, dest / f.relative_to(p.path)))
     for s, d in items:
         d.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(s, d)
@@ -1586,9 +1957,7 @@ def cmd_publish(a: argparse.Namespace) -> None:
         f.write_text(text, encoding="utf-8")
     append_event(p, "blueprint.published", "atlas", "Blueprint published to %s/docs/blueprint (%d files)" % (name, len(items)),
                  data={"repo": name, "files": len(items)}, by="user")
-    p.sync_push("Publish blueprint")
-    print("Copied %d file(s) to %s and updated AGENTS.md / CLAUDE.md. Commit them in the code repo when ready."
-          % (len(items), dest))
+    return len(items)
 
 
 def cmd_migrate(a: argparse.Namespace) -> None:
@@ -1649,7 +2018,7 @@ def cmd_handover_data(a: argparse.Namespace) -> None:
                       "modules": [{k: m[k] for k in ("id", "name", "rigour", "confirmed")} for m in s["modules"]],
                       "change_requests": s["crs"], "questions_open": s["questions"][0],
                       "milestones": [{k: ev.get(k) for k in ("seq", "ts", "type", "summary", "refs")}
-                                     for ev in evs if ev.get("type") in keep]}, indent=1, default=str))
+                                     for ev in evs if ev.get("type") in keep]}, default=str))
 
 
 HELP = """atlasctl — ATLAS project manager core
@@ -1658,6 +2027,7 @@ Setup and projects
   setup --mode folder --path <dir> | --mode github [--owner X] [--path <local clones>] [--no-deps]
   doctor                         check dependencies
   new "<name>" --client C --size Small|Medium|Large --author A [--repo name=<path-or-url> …]
+      [--start design|plan|build] [--prd <file>]   adopt existing work part-way through
   projects                       all projects and their next step
   use <PRJ-id>                   set the current project (clones it in GitHub mode)
   where [--lib|--plugin]         print the current project's storage path
@@ -1665,9 +2035,18 @@ Setup and projects
   sync                           pull and push project storage (GitHub mode)
   migrate --to github            move a folder-mode project to a private GitHub repo
 
+Agents (hand-offs)
+  begin <agent> [--phase P1] [--stage none|handover]    start a run: logs it and prints a short brief
+  finish <agent> [--phase P1] [--stage none|handover] [--summary "…"]   check, log, run the gate, save
+  pack <agent> [--phase P1] [--module M3] [--changed] [--report]   only the rows that agent needs
+  note --to <agent> "<text>" [--from <agent>]            leave a note for another agent
+  notes [--to <agent>] [--all]  ·  note-done <N-01> [--reply "…"]
+  intake <files or folder…> [--to discovery|design]      add client or design source files
+  stage <name> done|skipped|reset --reason "…"           correct a stage by hand
+
 Tracking
-  status [--json] [--no-reconcile]   reconcile code, then status, attention list, next step
-  reconcile                      scan repos for new commits / PRs / CI only
+  status [--json|--json full] [--fresh] [--no-reconcile]   scan code, run pending gates, show what needs you
+  reconcile [--fresh]            scan repos for new commits / PRs / CI only
   unmatched                      commits that match no work package or module
   learn '<glob>' <M#|WP-##>      remember which module/WP files belong to
   resolve <sha> --as unplanned|bugfix|chore|cr [--note …]
@@ -1680,8 +2059,8 @@ Decisions and gates
   event <type> --actor A --summary "…" [--refs a,b] [--data JSON]
   signoff --what "PRD v1.0" --by "Client role" [--evidence …] [--files …] [--phase P1]
   decision "<text>" [--by …]
-  rigour <M#> Light|Standard|Critical --reason "…"
-  gate G1..G5 [--phase P1] [--answer key=yes …] [--record] [--waive "<reason>"]
+  rigour <M#> Light|Standard|Critical --reason "…"   ·   rigour --accept [M2=Critical …]
+  gate G1..G5 [--phase P1] [--answer key=yes …] [--all] [--waive "<reason>"]   (gates also run by themselves)
   release <P#> [--note …]
   cr open "<text>" | cr approved|done|rejected CR-01 [--note …]
   impact <ID> [ID …] [--cr CR-01]
@@ -1689,7 +2068,7 @@ Decisions and gates
 
 Outputs
   export <file.md …> [--subtitle …]   PDF to ~/Desktop/<PRJ>-<name>-for-client/
-  publish [--repo name] [--yes]        copy design/ + plan/ into a code repo's docs/blueprint/
+  publish [--repo name] [--yes] [--always]   copy design/ + plan/ into a code repo's docs/blueprint/
   handover-data                        facts for reports and handover (JSON)
 """
 
@@ -1710,15 +2089,35 @@ def main() -> None:
     sp("doctor", cmd_doctor)
     x = sp("new", cmd_new); x.add_argument("name"); x.add_argument("--client"); x.add_argument("--size")
     x.add_argument("--author"); x.add_argument("--repo", action="append")
+    x.add_argument("--start"); x.add_argument("--prd"); x.add_argument("--track")
     sp("projects", cmd_projects)
     x = sp("use", cmd_use); x.add_argument("project_ref")
     x = sp("where", cmd_where); x.add_argument("--lib", action="store_true"); x.add_argument("--plugin", action="store_true")
     x = sp("link-repo", cmd_link_repo); x.add_argument("name"); x.add_argument("path")
     sp("sync", cmd_sync)
     x = sp("migrate", cmd_migrate); x.add_argument("--to", default="github"); x.add_argument("--owner")
-    x = sp("status", cmd_status); x.add_argument("--json", action="store_true")
-    x.add_argument("--no-reconcile", action="store_true")
-    sp("reconcile", lambda a: cmd_reconcile(find_project(load_config(), a.project)))
+    x = sp("status", cmd_status); x.add_argument("--json", nargs="?", const="summary", choices=["summary", "full"])
+    x.add_argument("--no-reconcile", action="store_true"); x.add_argument("--fresh", action="store_true")
+    x = sp("reconcile", lambda a: cmd_reconcile(find_project(load_config(), a.project), fresh=a.fresh))
+    x.add_argument("--fresh", action="store_true")
+    import flow  # noqa: E402
+    agents = ["atlas", "alice", "stark", "jarvis", "sentinel", "spartan"]
+    x = sp("begin", flow.cmd_begin); x.add_argument("agent", choices=agents); x.add_argument("--phase")
+    x.add_argument("--stage")
+    x = sp("finish", flow.cmd_finish); x.add_argument("agent", choices=agents); x.add_argument("--phase")
+    x.add_argument("--stage"); x.add_argument("--summary"); x.add_argument("--skip-check", action="store_true")
+    x = sp("pack", flow.cmd_pack); x.add_argument("agent", choices=agents); x.add_argument("--phase")
+    x.add_argument("--module"); x.add_argument("--changed", action="store_true")
+    x.add_argument("--report", action="store_true")
+    x = sp("note", flow.cmd_note); x.add_argument("text"); x.add_argument("--to", required=True, choices=agents + ["user"])
+    x.add_argument("--from", dest="sender"); x.add_argument("--refs")
+    x = sp("notes", flow.cmd_notes); x.add_argument("--to"); x.add_argument("--all", action="store_true")
+    x = sp("note-done", flow.cmd_note_done); x.add_argument("ids", nargs="+"); x.add_argument("--reply")
+    x.add_argument("--from", dest="sender")
+    x = sp("intake", flow.cmd_intake); x.add_argument("paths", nargs="+")
+    x.add_argument("--to", default="discovery", choices=["discovery", "design"])
+    x = sp("stage", flow.cmd_stage); x.add_argument("name"); x.add_argument("state", choices=["done", "skipped", "reset"])
+    x.add_argument("--reason", required=True)
     x = sp("unmatched", cmd_unmatched); x.add_argument("--limit", type=int, default=40)
     x = sp("learn", cmd_learn); x.add_argument("glob"); x.add_argument("target")
     x = sp("resolve", cmd_resolve); x.add_argument("sha"); x.add_argument("--as", dest="as_", required=True,
@@ -1737,10 +2136,12 @@ def main() -> None:
     x.add_argument("--phase")
     x = sp("decision", cmd_decision); x.add_argument("text"); x.add_argument("--by"); x.add_argument("--date")
     x.add_argument("--actor", default="atlas")
-    x = sp("rigour", cmd_rigour); x.add_argument("module"); x.add_argument("level"); x.add_argument("--reason", required=True)
+    x = sp("rigour", cmd_rigour); x.add_argument("items", nargs="*"); x.add_argument("--reason")
+    x.add_argument("--accept", action="store_true")
     x = sp("gate", cmd_gate); x.add_argument("gate"); x.add_argument("--phase"); x.add_argument("--answer", action="append")
     x.add_argument("--record", action="store_true"); x.add_argument("--waive"); x.add_argument("--no-reconcile",
                                                                                               action="store_true")
+    x.add_argument("--all", action="store_true")
     x = sp("release", cmd_release); x.add_argument("phase"); x.add_argument("--note"); x.add_argument("--force",
                                                                                                      action="store_true")
     x = sp("cr", cmd_cr); x.add_argument("action", choices=["open", "approved", "done", "rejected"])
@@ -1750,6 +2151,7 @@ def main() -> None:
     x = sp("export", cmd_export); x.add_argument("files", nargs="+"); x.add_argument("--subtitle")
     x.add_argument("--allow-internal", action="store_true")
     x = sp("publish", cmd_publish); x.add_argument("--repo"); x.add_argument("--yes", action="store_true")
+    x.add_argument("--always", action="store_true")
     sp("handover-data", cmd_handover_data)
 
     if len(sys.argv) < 2 or sys.argv[1] in ("help", "-h", "--help"):
@@ -1761,6 +2163,12 @@ def main() -> None:
         sys.exit(1)
     if not hasattr(a, "project"):
         a.project = None
+    try:                                        # keep the `atlas` terminal command pointing at this copy
+        lp = HOME / "lib_path"
+        if HOME.exists() and (not lp.exists() or lp.read_text(encoding="utf-8").strip() != str(LIB)):
+            lp.write_text(str(LIB), encoding="utf-8")
+    except OSError:
+        pass
     a.fn(a)
 
 

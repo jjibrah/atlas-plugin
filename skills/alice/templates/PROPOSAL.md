@@ -1,11 +1,15 @@
 # {{Project name}} — Proposal and Scope of Work
 
-**Prepared for:** {{Client}} · **Prepared by:** {{author}} · **Version:** {{v0.1 — YYYY-MM-DD}}
+| Prepared for | {{Client}} |
+|---|---|
+| Prepared by | {{author}} |
+| Version | {{v0.1 — YYYY-MM-DD}} |
 
 <!-- TEMPLATE NOTE — delete before finishing. For the client: business owners and staff, not engineers. Plain words,
 short paragraphs, their own vocabulary. No source tags, no internal IDs, no technical terms, no regulations section,
 no timeline and no prices. It must agree with PRD.md; add nothing that is not there. Clearly mark anything that is our
-suggestion rather than their request. -->
+suggestion rather than their request. A small client gets a short proposal: drop the diagram and section 10 if they
+add nothing. Keep the section names — `alice.py changed` points at them. -->
 
 ---
 

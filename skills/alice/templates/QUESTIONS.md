@@ -1,12 +1,18 @@
 # {{Project name}} — Questions for {{Client}}
 
-**From:** {{author}} · **Date:** {{YYYY-MM-DD}} · **Open questions:** {{N}}
+| For | {{Client}} |
+|---|---|
+| From | {{author}} |
+| Version | {{v0.1 — YYYY-MM-DD}} |
+| Open questions | {{N}} ({{N}} needed before we start) |
 
 Thank you for the time you have given us so far. To finalise the scope we need your input on the points below. Please write your answer in the **Your answer** column — a short reply is fine. Where we have suggested an answer, you can simply reply "agree".
 
 <!-- TEMPLATE NOTE — delete before finishing. Client-facing: plain words, one question per row, answerable in a line or
 two. Group by topic. "Needed before we start" first. When a question is answered (or withdrawn), MOVE its row to
-"Already answered" with the date and status — it stays there as the record. No internal IDs or source tags. -->
+"Already answered" with the date and status — it stays there as the record. No internal IDs or source tags.
+Scripts read this file: keep the three `##` section names, start every question row with its Q-number and keep
+Status as the last column. Raise the version whenever a question is added, answered or withdrawn. -->
 
 ## Needed before we start
 

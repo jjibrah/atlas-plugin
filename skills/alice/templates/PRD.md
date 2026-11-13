@@ -7,16 +7,16 @@
 | | |
 |---|---|
 | Version | {{v0.1 — YYYY-MM-DD}} |
-| Status | {{Draft — discovery in progress / Ready for build}} |
+| Status | {{Draft — discovery in progress / Approved by client}} |
 | Prepared by | {{author}} |
 | Based on | {{N}} meetings ({{M01–M03}}), {{N}} client documents — see §21 |
 | Requirements | {{N}} functional ({{N}} confirmed · {{N}} proposed · {{N}} to confirm) |
 | Open questions | {{N}} for the client ({{N}} needed before we start) · {{N}} waiting on our team |
 
-<!-- TEMPLATE NOTE — delete before finishing. Be detailed: this is the knowledge base the team builds from and comes
-back to. Every factual statement carries a provenance tag. Quote the client's own words where they matter.
-Scale to the project: a small client keeps short sections, diagrams only for the one or two workflows that matter, and
-writes "None identified yet." for sections that do not apply — never padding. -->
+<!-- TEMPLATE NOTE — delete before finishing. Full layout, for Medium and Large projects (Small ones use PRD-small.md).
+Be detailed: this is the knowledge base the team builds from. Every factual statement carries a provenance tag; quote
+the client's own words where they matter. Diagrams only for the workflows that matter. A section that does not apply
+says "None identified yet." — never delete a heading (other agents cite sections by number), never pad. -->
 
 ---
 

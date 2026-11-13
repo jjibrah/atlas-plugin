@@ -1,6 +1,6 @@
 # ATLAS plugin: design
 
-> The design ATLAS v1 was built from. The binding interface between agents is [`CONTRACT.md`](../CONTRACT.md); where the two differ, the contract and the code win. v1 notes: machine state is JSON (`atlas.json`, `state/*.json`, `log/events.jsonl`); recorded decisions are derived from the event log; generated views are Markdown. The plugin installs in both Claude Code (`.claude-plugin/`) and Codex (`.codex-plugin/`, `.agents/plugins/`).
+> The design ATLAS v1 was built from. What changed in v1.1 (automatic checks, begin/finish/pack, inferred progress, notes, the small track) is in [`CHANGELOG.md`](../CHANGELOG.md) and [`CONTRACT.md`](../CONTRACT.md) §0. The binding interface between agents is [`CONTRACT.md`](../CONTRACT.md); where the two differ, the contract and the code win. v1 notes: machine state is JSON (`atlas.json`, `state/*.json`, `log/events.jsonl`); recorded decisions are derived from the event log; generated views are Markdown. The plugin installs in both Claude Code (`.claude-plugin/`) and Codex (`.codex-plugin/`, `.agents/plugins/`).
 
 ---
 

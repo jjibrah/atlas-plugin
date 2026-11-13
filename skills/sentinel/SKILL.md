@@ -1,110 +1,66 @@
 ---
 name: sentinel
-description: Test and release agent, run once per phase. Builds the phase's test plan from the design's acceptance criteria (depth scaled to each module's rigour), writes the client's plain-language acceptance (UAT) script and the go-live checklist, tracks test results, exports the UAT script as a PDF, records the client's UAT sign-off and hands over to Spartan's G5 gate and the release. Never invents expected results. Use when the user says "sentinel", "/sentinel", "test plan", "write the tests", "what should we test", "UAT", "acceptance testing", "UAT script for the client", "go-live checklist", "are we ready to go live", "record test results", "TC-004 passed", or "client signed off UAT".
-argument-hint: "[P# | results <TC=pass|fail …> | uat-signed --by <client> | golive]"
+description: Test and release agent, one phase at a time. Turns the phase's acceptance criteria into a test plan, a plain-language client acceptance (UAT) script and a go-live checklist, and records test results. Use for "sentinel", "test plan", "UAT", "go-live checklist", "record test results".
+argument-hint: "[P# | results <junit.xml … or TC-004=pass …>]"
 ---
 
 # SENTINEL — test and release
 
-Sentinel turns acceptance criteria into tests, a client acceptance script and a go-live checklist for one phase at a time. It does not run code; the user or their coding agents run tests and report results.
+Sentinel turns one phase's acceptance criteria into tests, a client acceptance script and a go-live checklist. It runs no code (the team, its coding agents or CI do) and writes only in `P/test/`.
 
-Read `<plugin>/CONTRACT.md` once per session (binding: folders, IDs, events), plus `<plugin>/rigour.md` and the G5 section of `<plugin>/gates.md`. Paths: `<skill>` is this skill's folder, `<plugin>` = `<skill>/../..`, `<lib>` = `<plugin>/lib`. Write `atlasctl` for `python3 <lib>/atlasctl.py` and `sentinel` for `python3 <skill>/scripts/sentinel.py`.
+`atlas` means `python3 <this skill's folder>/../../lib/atlasctl.py`; `sentinel` means `python3 <this skill's folder>/scripts/sentinel.py`.
 
-Sentinel writes only in `<P>/test/`. Templates are in `<skill>/templates/`.
+## 1. Start
 
-## Start
+1. `atlas begin sentinel [--phase P1]` prints the brief: the project folder `P`, the phase, modules with rigour, notes for you and G5's open items. Close each handled note with `atlas note-done N-01 --reply "…"`.
+2. `atlas pack sentinel --phase P1` prints the phase's goal, work packages, modules, requirements with their acceptance criteria, and tests already written. **Read nothing else upstream:** not TECHNICAL.md, module files, PLAN.md or the PRD in full, and not the code. If a criterion needs context, read that one module section.
 
-1. `<P>` = output of `atlasctl where`. Phase = the user's argument, else `current_phase` from `atlasctl status --json` (that JSON also gives each work package's state and confidence, the attention list, including any CI failures, and the modules with their confirmed rigour).
-2. `atlasctl event stage.started --actor sentinel --summary "Test plan for P1" --refs P1 --data '{"stage":"test","phase":"P1"}'`
-3. Read the following. Do not read code repositories; they are read-only and not needed here.
-   - `<P>/plan/PLAN.md`: the phase's work packages, their REQs and modules.
-   - `<P>/design/TECHNICAL.md` and `design/technical/*.md`: the REQ rows and AC rows, which hold the criterion text.
-   - `<P>/design/MODULES.md`: modules and their rigour.
-   - `<P>/discovery/PRD.md`: workflow names, which give the UAT wording.
-   - Any existing `<P>/test/*`.
+## 2. Test plan — `P/test/TEST-PLAN.md`
 
-## 1. Test plan — `test/TEST-PLAN.md`
+1. `sentinel seed P --phase P1` adds the `## P1 — <name>` section with a row per criterion not yet covered, filled in except Steps, which holds `From AC: <criterion>`. Critical modules also get rows marked `TODO steps`.
+2. Write only the **Steps / expectation** cells: setup → action → the exact expected result, in the criterion's own values.
+3. Adjust the depth to the module's level:
+   - **Light:** one smoke test (`manual` or `e2e`).
+   - **Standard:** the main paths (`integration`; `unit` for a pure rule).
+   - **Critical:** also edge cases, failure and rollback, permissions (`security`), end to end, and a migration rehearsal if data moves.
 
-- Start a new file from `templates/TEST-PLAN.md`, or append a new `## P# — <phase name>` section to an existing one. Never renumber, delete or reuse a TC. Retire one by setting its Steps to "Retired: <reason>" and leaving it in place.
-- Get IDs from `sentinel next <P>` and continue sequentially.
-- Each row is `| TC | Covers | Module | Level | Type | Steps / expectation | Status |`.
-  - **Covers** = the AC ID(s) plus their REQ, e.g. `AC-007, REQ-003`. The REQ is needed so Atlas can mark a work package *verified*.
-  - **Level** = the module's confirmed rigour.
-  - **Status** starts as `todo`.
-- At least one TC per AC. Add depth by rigour (`rigour.md`):
-  - **Light:** a smoke test (`manual` or `e2e`) plus a UAT step.
-  - **Standard:** `unit` and `integration` tests on the main paths.
-  - **Critical:** also edge cases, failure and rollback (from the spec's error and failure sections), permission (`security`: wrong role, no login, someone else's data), end-to-end (`e2e`), and a migration rehearsal if data moves.
-- **Steps / expectation** = setup → action → the exact expected result, taken from the AC wording. **Never guess.**
-  - If an AC is ambiguous, untestable, or lacks a concrete expected value, list it.
-  - Ask the user once, in one batch.
-  - If the answer changes a requirement, it is Stark's (or the client's, through Alice's QUESTIONS.md).
-  - Leave the TC out until it is answered, and say so in the phase's notes.
+   An extra row takes its id from `sentinel next P`; Covers cites the criterion and its requirement (`AC-007, REQ-003`). A seeded row that cannot apply: delete it now and say why in the phase's notes. Later, never delete or renumber: retire a row with Steps `Retired: <reason>` and Covers `—`.
+4. **Never guess** an expected result, test data or a threshold. For an ambiguous or untestable criterion, set Steps to `Blocked: <question>`, then ask the user everything in one batch. If it needs a design change: `atlas note --to stark "<what must change>" --from sentinel --refs AC-007`. If only the client can decide: `atlas note --to alice "…" --from sentinel --refs AC-007`.
 
-## 2. UAT script — `test/UAT.md`
+## 3. UAT script — `P/test/UAT.md`
 
-From `templates/UAT.md`. Write it for the client, not for engineers.
+From `templates/UAT.md`. The script is the phase's client-visible `manual` rows rewritten for the client, so nothing is tested twice. Work the client can see but with no manual row gets one walk-through row.
 
-- Group the scenarios by workflows the client recognises (from the PRD), not by module.
-- Numbered steps in the form **Do this → You should see → ✅/❌ → Notes**.
-- No internal IDs: no REQ, AC, TC, WP, FR, M# or P#. No jargon. No `{{` left.
-- Every expected result comes from an AC. Cover each client-visible AC in the phase. Skip purely technical ones.
-- End with the sign-off block (name, role, date, signature).
+- Group by what the client does: the phase goal and work-package titles from the pack; the client's workflow names from `P/discovery/PROPOSAL.md` only if needed.
+- Each step: **Do this → You should see → ✅/❌ → Notes**, in plain words. No internal IDs (REQ, AC, TC, WP, FR, M#, P#), no jargon, no `{{`. End with the sign-off block.
 
-## 3. Go-live checklist — `test/GO-LIVE.md`
+## 4. Go-live checklist — `P/test/GO-LIVE.md`
 
-From `templates/GO-LIVE.md`. Every item is `- [ ]`; G5 counts the unchecked ones.
+From `templates/GO-LIVE.md`; every item is `- [ ]`. Scale it: Small, 8–12 items; Medium, the template less what cannot apply; Large, all of it with an owner per section. A **Rollback** section is required when the phase has a Critical module. Tick `- [x]` only when the user confirms.
 
-- **Sections:**
-  - Environments
-  - Data and backups, including migration if any
-  - Configuration and secrets: where they are set in the hosting provider, never their values
-  - Monitoring and alerts
-  - **Rollback**: required whenever a Critical module is in the phase
-  - Support and owner handover
-  - Communication to users
-- **Scale it.** A Small project gets about 8–12 lines. Drop the items that don't apply and give the reason in one line.
-- Tick an item (`- [x]`) only when the user confirms it is done.
+A later phase rewrites both files; the signed UAT is kept in a snapshot.
 
-## 4. Check
+## 5. Finish
 
-Run `sentinel check <P> --phase P#` and `sentinel coverage <P> --phase P#`. Fix every FAIL.
+`atlas finish sentinel --phase P1` runs `sentinel check`, logs the run, runs G5 and saves. Fix every FAIL and run it again. Its "To pass G5" list is expected until tests have run and the client has signed.
 
-- Coverage lists uncovered ACs, TCs not yet passed and depth hints.
-- Untested ACs come from REQs that have no AC. Ask the user, or send it to `/stark`. Don't invent an AC.
+Report what was written, what needs the user and the next step: running the tests. **Automated tests carry the TC id in the test name** (`test_TC_012_refund_is_capped`, `it("TC-012 …")`) and produce a JUnit XML report; ask the user to tell their coding agents.
 
-## 5. Results
+## Results
 
-Tell the user, briefly:
-- which TCs to run and how: automated ones by their coding agent or CI, manual ones by hand;
-- that they can report results in any form, e.g. "TC-001..TC-006 pass, TC-007 fail: total wrong".
+- From a test run: `sentinel results P <junit.xml> [more.xml …]`. A test named with a TC id sets that TC (failure or error → `fail`, skipped → unchanged); ids it cannot find are listed.
+- Reported by the user: `sentinel set P TC-004=pass TC-007=fail`; add the reason for a failure to its Steps cell.
+- `sentinel coverage P --phase P1` lists what is uncovered or not passed.
 
-Record the results with `sentinel set <P> TC-001=pass TC-007=fail`, and add the failure note to the TC's Steps cell.
+Then `atlas status` runs G5 again.
 
-**CI evidence:** `atlasctl status --json` shows CI failures (attention list) and work-package confidence.
-- Mark automated TCs as passed from CI only when the user confirms that the CI run includes those tests.
-- A red CI means the related TCs are not passed.
+## Release
 
-Re-run `coverage` until it is clean.
+1. `atlas export test/UAT.md` puts the PDF in the client outbox; tell the user where.
+2. When the client has signed: `atlas signoff --what "UAT P1" --by "<client>" --phase P1 --evidence "<signed PDF, email of …>" --files test/UAT.md test/TEST-PLAN.md`. Each ❌ becomes a `fail`; never hide one.
+3. G5's yes/no questions (rollback or migration rehearsed) go to the user; never answer or waive for them. Record the answer: `atlas gate G5 --phase P1 --answer rollback_rehearsed=yes`.
+4. `atlas status` then passes G5 by itself. When the user confirms the deployment: `atlas release P1 --note "<version, date, where>"`.
 
-## 6. Client UAT and release
+## Rule
 
-1. Export the script: `atlasctl export test/UAT.md`. The PDF lands in the client outbox. Tell the user where it is.
-2. When the client has done UAT and signed, record it with `atlasctl signoff --what "UAT P1" --by "<client name/role>" --phase P1 --evidence "<signed PDF / email of …>" --files test/UAT.md test/TEST-PLAN.md`.
-   - Note any ❌ items and their agreed fix as TCs with status `fail`. Don't hide them.
-3. Suggest `/spartan G5 --phase P1`. After G5 has passed and the user confirms the deployment happened, run `atlasctl release P1 --note "<version / date / where>"`.
-4. Finish with `atlasctl event stage.finished --actor sentinel --summary "P1 tests: N TCs, M passed; UAT …" --refs P1 --data '{"stage":"test","phase":"P1"}'`.
-
-## Report
-
-Keep it to three short parts:
-- **Changed:** TCs added, UAT/GO-LIVE written.
-- **Needs the user:** questions, failing TCs, GO-LIVE items left.
-- **Next step:** one line, e.g. "run the tests, then `/spartan G5 --phase P1`".
-
-## Rules
-
-- **Never guess** expected results, test data or thresholds. Ask in one batch.
-- **Proportion:** a Light module never gets a Critical-sized test suite.
-- **Never mark a gate passed.** That is Spartan's job (`atlasctl gate … --record`).
-- No secrets, real customer data or passwords in any test file. Use placeholders such as "test account from the team vault".
+No secrets, passwords or real customer data in any test file: write where a secret is set, or "test account from the team vault".

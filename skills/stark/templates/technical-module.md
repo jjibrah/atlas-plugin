@@ -13,9 +13,9 @@
 | Code location | {{`backend/orders/`, `frontend/src/orders/` — same globs as MODULES.md → Paths}} |
 
 <!-- TEMPLATE NOTE — delete before finishing. File name: technical/mNN-<name>.md (m01-identity.md) — gate G2 finds the
-module's spec by that name. Depth follows rigour (rigour.md): Light → §3 use cases and §12 acceptance criteria (drop the
-rest with "None — Light module."); Standard → + §1, §2, §4, §5, §6, §7, §8 where they apply; Critical → everything,
-including §10 failure & rollback and §11 threat notes and audit trail. -->
+module's spec by that name. Depth follows rigour: Light → §3 use cases and §12 acceptance criteria (drop the rest with
+"None — Light module."); Standard → + §1, §2, §4, §5, §6, §7, §8 where they apply; Critical → everything, including
+§9 errors & edge cases, §10 failure & rollback and §11 threat notes and audit trail. -->
 
 ## 1. Entities owned by this module
 
@@ -79,12 +79,11 @@ sequenceDiagram
 Audit trail: {{actions logged with who / what / when / before-after; who can read the log; retention}}
 
 ## 12. Acceptance criteria
-<!-- TEMPLATE NOTE — delete before finishing. This is the one home of acceptance criteria. IDs are global and sequential:
-get the next with `register.py next-ac <D>`. Every row cites its REQ in the REQ column; Jarvis's work packages and
-Sentinel's tests cite these AC IDs. -->
+<!-- TEMPLATE NOTE — delete before finishing. The one home of this module's acceptance criteria. Write AC-NEW; afterwards
+`register.py number-ac <D>` gives global sequential IDs. Every row cites its REQ; work packages and tests cite the AC IDs. -->
 | AC | REQ | Given / when / then |
 |---|---|---|
-| AC-{{001}} | REQ-… | Given …, when …, then … |
+| AC-NEW | {{REQ-…}} | {{Given …, when …, then …}} |
 
 ## 13. Open questions & assumptions affecting this module
 {{IDs only, each with at most one line on the impact here — e.g. "OQ-3: decides whether `expires_at` is needed." Full text is in DECISIONS.md.}}
