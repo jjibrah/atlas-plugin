@@ -121,7 +121,10 @@ GitHub Pages serves the `docs/` folder on `main`; pushes that update this folder
 publish automatically. `docs/.nojekyll` keeps the guide as plain static HTML.
 No build tools or application server are needed.
 
-To update the guide, edit `docs/index.html`, commit, and push to `main`.
+To update the guide, edit `docs/index.html`, `docs/assets/style.css` (design),
+or `docs/assets/guide.js` (interactions), then commit and push to `main`.
+The guide uses a light theme, responsive navigation, copyable setup commands,
+and a searchable command reference.
 
 ## Licence
 
